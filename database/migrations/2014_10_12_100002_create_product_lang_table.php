@@ -11,12 +11,12 @@ return new class extends Migration
         Schema::create('product_lang', callback: function (Blueprint $table) {
             $table->bigIncrements('id');
             $table->unsignedBigInteger('product_id');
-            $table->unsignedBigInteger('prestashop_id');
+            $table->unsignedBigInteger('prestashop_id')->nullable();
             $table->unsignedBigInteger('lang_id');
             $table->string('title')->nullable();
             $table->text('characteristics')->nullable();
             $table->string('url', 2048)->nullable();
-            $table->decimal('price', 12, 2);
+            $table->decimal('price', 12, 2)->nullable();
             $table->integer('stock')->nullable();
             $table->tinyInteger('comparator')->default(0);
             $table->tinyInteger('label')->default(0);

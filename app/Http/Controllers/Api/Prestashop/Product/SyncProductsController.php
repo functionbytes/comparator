@@ -85,7 +85,6 @@ public function sync()
 
                 $langSyncData = [];
 
-                dd($psProduct->langs);
                 foreach ($psProduct->langs as $langEntry) {
                     $psLang = $prestashopLangs->get($langEntry->id_lang);
                     if (!$psLang) continue;
@@ -104,6 +103,9 @@ public function sync()
                 if (!empty($langSyncData)) {
                     $comparatorProduct->langs()->syncWithoutDetaching($langSyncData);
                 }
+
+
+                dump($psProduct->prices);
 
                 foreach ($psProduct->prices as $price) {
 

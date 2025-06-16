@@ -20,6 +20,12 @@ return new class extends Migration
             $table->integer('stock')->nullable();
             $table->tinyInteger('comparator')->default(0);
             $table->tinyInteger('label')->default(0);
+            $table->integer('from_quantity')->default(1);
+            $table->decimal('reduction', 20, 6)->default(0);
+            $table->boolean('reduction_tax')->default(true);
+            $table->enum('reduction_type', ['amount', 'percentage'])->default('amount');
+            $table->timestamp('from')->nullable();
+            $table->timestamp('to')->nullable();
             $table->timestamps();
             $table->foreign('product_id')->references('id') ->on('products')->onDelete('cascade');
             $table->foreign('lang_id')->references('id')->on('langs')->onDelete('cascade');

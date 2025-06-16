@@ -36,7 +36,6 @@ public function sync()
         ->where('active', 1)
         ->chunkById(200, function ($prestashopProducts) {
 
-            // Pre-cargar todos los idiomas para evitar consultas repetidas
             $prestashopLangIds = [];
             foreach ($prestashopProducts as $product) {
                 foreach ($product->langs as $lang) {
@@ -57,7 +56,6 @@ public function sync()
 
             foreach ($prestashopProducts as $psProduct) {
 
-
                 if (empty($psProduct->reference)) {
                     Log::warning("Skipping Prestashop product ID {$psProduct->id_product} (no reference)");
                     continue;
@@ -75,7 +73,6 @@ public function sync()
 
                 $newPrice = (float) $psProduct->price;
 
-                // Verificar que current_price existe antes de comparar
                 if ($comparatorProduct->exists &&
                     isset($comparatorProduct->current_price) &&
                     (float) $comparatorProduct->current_price !== $newPrice) {
@@ -86,10 +83,9 @@ public function sync()
                     ]);
                 }
 
-                // Preparar datos para sincronización masiva de idiomas
                 $langSyncData = [];
 
-                // Procesar idiomas
+                dd($psProduct->langs);
                 foreach ($psProduct->langs as $langEntry) {
                     $psLang = $prestashopLangs->get($langEntry->id_lang);
                     if (!$psLang) continue;
@@ -105,12 +101,10 @@ public function sync()
                     ];
                 }
 
-                // Ejecutar sincronización de idiomas (solo traducciones, sin precios)
                 if (!empty($langSyncData)) {
                     $comparatorProduct->langs()->syncWithoutDetaching($langSyncData);
                 }
 
-                // Procesar precios por separado usando ProductLang directamente
                 foreach ($psProduct->prices as $price) {
 
                     // Si el precio tiene su propio id_lang, usarlo
@@ -120,7 +114,6 @@ public function sync()
                     if ($priceLangId && isset($langSyncData[$priceLangId])) {
                         $targetLangId = $langSyncData[$priceLangId]['lang_id'];
                     } else {
-                        // Si no, usar el primer idioma disponible
                         $firstLangData = reset($langSyncData);
                         $targetLangId = $firstLangData ? $firstLangData['lang_id'] : null;
                     }

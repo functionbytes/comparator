@@ -14,7 +14,8 @@ return new class extends Migration
         Schema::create('categories', function (Blueprint $table) {
             $table->bigIncrements('id');
             $table->char('uid', 36)->unique();
-            $table->string('title');
+            $table->string('title')->nullable();
+            $table->unsignedBigInteger('management_id')->nullable();
             $table->tinyInteger('available')->default(0);
             $table->timestamps();
         });

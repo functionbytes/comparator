@@ -2,6 +2,7 @@
 
 namespace App\Models\Prestashop\Product;
 
+use App\Models\Prestashop\Category\Category;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -47,6 +48,30 @@ class Product extends Model
             $q->where('name', 'like', '%' . $name . '%');
         });
     }
+
+    public function defaultCategory()
+    {
+        return $this->belongsTo('App\Models\Prestashop\Category\Category', 'id_category_default', 'id_category');
+    }
+
+    public function getBaseParentCategoryAttribute(): ?Category
+    {
+        $this->loadMissing('defaultCategory');
+
+        $defaultCategory = $this->defaultCategory;
+
+        if (!$defaultCategory || $defaultCategory->level_depth <= 2) {
+            return $defaultCategory?->level_depth == 2 ? $defaultCategory : null;
+        }
+
+        return Category::with('lang')
+            ->where('nleft', '<', $defaultCategory->nleft)
+            ->where('nright', '>', $defaultCategory->nright)
+            ->where('level_depth', 2)
+            ->first();
+    }
+
+
     public function getNameAttribute()
     {
         return $this->lang ? $this->lang->name : null;

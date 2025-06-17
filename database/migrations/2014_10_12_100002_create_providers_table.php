@@ -11,7 +11,8 @@ return new class extends Migration
         Schema::create('providers', function (Blueprint $table) {
             $table->bigIncrements('id');
             $table->char('uid', 36)->unique();
-            $table->string('title');
+            $table->string('title')->nullable();
+            $table->string('code')->unique();
             $table->tinyInteger('available')->default(0);
             $table->timestamps();
         });

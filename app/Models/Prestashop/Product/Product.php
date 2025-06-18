@@ -97,10 +97,5 @@ class Product extends Model
         return $this->hasMany('App\Models\Prestashop\Product\ProductLang', 'id_product');
     }
 
-    public function prices()
-    {
-        return $this->hasMany('App\Models\Prestashop\Specific\SpecificPrice', 'id_product');
-    }
-
 
 }

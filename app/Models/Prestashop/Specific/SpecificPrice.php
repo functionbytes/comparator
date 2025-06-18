@@ -11,19 +11,19 @@ class SpecificPrice extends Model
     use HasFactory;
 
     protected $connection = 'prestashop';
-    protected $table = 'aalv_product';
+    protected $table = 'aalv_specific_price';
 
     protected $primaryKey = 'id_specific_price';
     public $timestamps = false;
 
     protected $fillable = [
-        'product_id',
-        'product_attribute_id',
-        'shop_id',
-        'currency_id',
-        'country_id',
-        'group_id',
-        'user_id',
+        'id_cart',
+        'id_specific_price_rule',
+        'id_product',
+        'id_shop',
+        'id_shop_group',
+        'id_currency',
+        'id_country',
         'price',
         'from_quantity',
         'reduction',

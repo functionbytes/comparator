@@ -3,6 +3,7 @@
 namespace App\Models\Prestashop\Product;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ProductAttribute extends Model
 {
@@ -34,9 +35,22 @@ class ProductAttribute extends Model
         'available_date',
     ];
 
+    public function stock()
+    {
+        return $this->hasOne(
+            'App\Models\Prestashop\Stock',
+            'id_product_attribute',
+            'id_product_attribute'
+        );
+    }
     public function product()
     {
         return $this->belongsTo('App\Models\Prestashop\Product\Product', 'id_product');
+    }
+
+    public function lang()
+    {
+        return $this->hasOne('App\Models\Prestashop\Lang', 'id_lang', 'id_lang');
     }
 
     public function attributes()
@@ -53,4 +67,29 @@ class ProductAttribute extends Model
     {
         return $this->default_on == 1;
     }
+
+    public function prices()
+    {
+        return $this->hasMany(
+            'App\Models\Prestashop\Specific\SpecificPrice',
+            'id_product_attribute',
+            'id_product_attribute'
+        );
+    }
+
+
+    public function getUrlAttribute()
+    {
+        $base = rtrim(env('URL_PRESTASHOP', 'https://a-alvarez.com'), '/');
+        $lang = $this->relationLoaded('lang') ? $this->lang : $this->lang()->first();
+
+        $iso = optional($lang)->iso_code ?? 'es';
+        $langSegment = ($iso !== 'es') ? "/$iso" : '';
+        $url = "{$base}{$langSegment}/{$this->id_product}-{$this->product->link_rewrite}";
+
+        // $url .= '?id_product_attribute=' . $this->id_product_attribute;
+
+        return $url;
+    }
+
 }

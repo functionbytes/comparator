@@ -14,17 +14,17 @@ return new class extends Migration
             $table->unsignedBigInteger('lang_id');
             $table->string('title')->nullable();
             $table->text('characteristics')->nullable();
-            $table->string('url', 2048)->nullable();
-            $table->decimal('price', 12, 2)->nullable();
-            $table->integer('stock')->nullable();
+            $table->decimal('price', 12, 2)->default(0.00);
+            $table->integer('stock')->default(0);
             $table->tinyInteger('comparator')->default(0);
             $table->decimal('reduction', 20, 6)->default(0);
             $table->tinyInteger('available')->default(0);
+            $table->text('url')->nullable();
             $table->timestamps();
             $table->softDeletes();
             $table->foreign('product_id')->references('id') ->on('products')->onDelete('cascade');
             $table->foreign('lang_id')->references('id')->on('langs')->onDelete('cascade');
-            $table->unique(['product_id', 'lang_id'], 'product_lang_unique');
+            $table->unique(['product_id', 'lang_id','id'], 'product_lang_unique');
 
         });
     }

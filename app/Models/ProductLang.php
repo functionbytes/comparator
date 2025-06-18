@@ -1,44 +1,45 @@
 <?php
-
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ProductLang extends Model
 {
+    use SoftDeletes;
+
     protected $table = 'product_lang';
 
     protected $fillable = [
         'product_id',
-        'prestashop_id',
         'lang_id',
         'title',
         'characteristics',
-        'url',
         'price',
+        'url',
         'stock',
-        'from_quantity',
-        'reduction',
-        'reduction_tax',
-        'reduction_type',
-        'from',
-        'to',
         'comparator',
-        'label',
+        'reduction',
+        'available',
     ];
 
     protected $casts = [
-        'price' => 'decimal:2',
-        'stock' => 'integer',
-        'from_quantity' => 'integer',
-        'reduction' => 'decimal:2',
-        'reduction_tax' => 'boolean',
-        'from' => 'datetime',
-        'to' => 'datetime',
-        'comparator' => 'integer',
-        'label' => 'integer',
+        'product_id'     => 'integer',
+        'lang_id'        => 'integer',
+        'title'          => 'string',
+        'characteristics'=> 'string',
+        'url'=> 'string',
+        'price'          => 'decimal:2',
+        'stock'          => 'integer',
+        'comparator'     => 'boolean',
+        'reduction'      => 'decimal:6',
+        'available'      => 'boolean',
+        'created_at'     => 'datetime',
+        'updated_at'     => 'datetime',
+        'deleted_at'     => 'datetime',
     ];
+
 
     public function product(): BelongsTo
     {
@@ -49,5 +50,6 @@ class ProductLang extends Model
     {
         return $this->belongsTo('App\Models\Lang', 'lang_id');
     }
+
 
 }

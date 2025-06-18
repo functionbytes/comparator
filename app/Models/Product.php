@@ -6,6 +6,7 @@ use App\Traits\HasUid;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Product extends Model
 {
@@ -28,6 +29,11 @@ class Product extends Model
         'updated_at',
     ];
 
+    public function references(): HasMany
+    {
+        return $this->hasMany('App\Models\ProductReference', 'product_id');
+    }
+
     public function category(): BelongsTo
     {
         return $this->belongsTo('App\Models\Category', 'category_id');
@@ -46,7 +52,6 @@ class Product extends Model
             ->withTimestamps();
     }
 
-
     public function langs()
     {
         return $this->belongsToMany(
@@ -56,20 +61,12 @@ class Product extends Model
             'lang_id'
         )
             ->withPivot([
-                'prestashop_id',
                 'title',
                 'characteristics',
-                'url',
                 'price',
                 'stock',
-                'from_quantity',
                 'reduction',
-                'reduction_tax',
-                'reduction_type',
-                'from',
-                'to',
                 'comparator',
-                'label',
             ])
             ->withTimestamps();
     }

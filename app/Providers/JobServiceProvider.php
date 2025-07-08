@@ -43,5 +43,22 @@ class JobServiceProvider extends ServiceProvider
     {
     }
 
+    protected function getJobObject($event)
+    {
+        try {
+            $payload = $event->job->payload();
+
+            // Laravel serializa el Job en 'command'
+            if (isset($payload['data']['command'])) {
+                return unserialize($payload['data']['command']);
+            }
+
+            return null;
+        } catch (\Throwable $e) {
+            \Log::error('Error getting job object: ' . $e->getMessage());
+            return null;
+        }
+    }
+
 
 }

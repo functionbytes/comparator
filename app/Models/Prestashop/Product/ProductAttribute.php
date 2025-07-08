@@ -74,7 +74,16 @@ class ProductAttribute extends Model
             'App\Models\Prestashop\Specific\SpecificPrice',
             'id_product_attribute',
             'id_product_attribute'
-        );
+        )->where('id_country', 0)
+            ->where(function ($query) {
+            $query->where('from', '<=', now())
+                ->orWhereNull('from')
+                ->orWhere('from', '0000-00-00 00:00:00');
+        })->where(function ($query) {
+            $query->where('to', '>=', now())
+                ->orWhereNull('to')
+                ->orWhere('to', '0000-00-00 00:00:00');
+        });
     }
 
 

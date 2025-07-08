@@ -43,7 +43,12 @@ class ProductReference extends Model
             ])->first();
 
             if ($productLang) {
-                $this->attributes['url'] = $productLang->url . '?id_product_attribute=' . $this->attribute_id;
+
+                $this->attributes['url'] = $productLang->url;
+
+                if (!empty($this->attribute_id)) {
+                    $this->attributes['url'] .= '?id_product_attribute=' . $this->attribute_id;
+                }
                 return;
             }
         }

@@ -71,6 +71,32 @@ class Product extends Model
             ->first();
     }
 
+    public function stock()
+    {
+        return $this->hasOne(
+            'App\Models\Prestashop\Stock',
+            'id_product',
+            'id_product'
+        );
+    }
+
+    public function prices()
+    {
+        return $this->hasMany(
+            'App\Models\Prestashop\Specific\SpecificPrice',
+            'id_product',
+            'id_product'
+        )->where('id_country', 0)
+            ->where(function ($query) {
+            $query->where('from', '<=', now())
+                ->orWhereNull('from')
+                ->orWhere('from', '0000-00-00 00:00:00');
+        })->where(function ($query) {
+            $query->where('to', '>=', now())
+                ->orWhereNull('to')
+                ->orWhere('to', '0000-00-00 00:00:00');
+        });
+    }
 
     public function getNameAttribute()
     {
@@ -85,6 +111,12 @@ class Product extends Model
     public function shop()
     {
         return $this->belongsToMany('App\Models\Prestashop\Shop', 'ps_product_shop', 'id_product', 'id_shop');
+    }
+
+
+    public function manufacturer()
+    {
+        return $this->belongsToMany('App\Models\Prestashop\Manufacturer',  'id_manufacturer');
     }
 
     public function lang()

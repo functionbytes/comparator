@@ -5,6 +5,8 @@ use Illuminate\Support\Facades\Route;
 
 Route::group(['prefix' => 'products'], function () {
    Route::get('/sync', [SyncProductsController::class, 'sync']);
+    Route::get('/jobs', [SyncProductsController::class, 'jobs']);
+    Route::get('/xml/{lang}', [SyncProductsController::class, 'xml']);
 });
 
 

@@ -19,6 +19,7 @@ class Product extends Model
         'uid',
         'ean',
         'upc',
+        'manufacturer_id',
         'provider_id',
         'prestashop_id',
         'article_id',

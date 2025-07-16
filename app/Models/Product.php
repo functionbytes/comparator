@@ -56,20 +56,27 @@ class Product extends Model
     public function langs()
     {
         return $this->belongsToMany(
-            'App\Models\Lang',
-            'product_lang',
-            'product_id',
-            'lang_id'
+            \App\Models\Lang::class,
+            'product_lang',     // Tabla pivote
+            'product_id',       // Clave foránea en la tabla pivote hacia este modelo
+            'lang_id'           // Clave foránea hacia el modelo Lang
         )
-            ->withPivot([
-                'title',
-                'characteristics',
-                'price',
-                'stock',
-                'reduction',
-                'comparator',
-            ])
-            ->withTimestamps();
+        ->withPivot([
+            'title',
+            'characteristics',
+            'price',
+            'stock',
+            'url',
+            'reduction',
+            'comparator',
+            'available',
+        ])
+        ->withTimestamps();
+    }
+
+    public function getLangData($langId)
+    {
+        return $this->langs->firstWhere('id', $langId);
     }
 
 

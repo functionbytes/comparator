@@ -114,6 +114,12 @@ class Product extends Model
     }
 
 
+    public function images()
+    {
+        return $this->belongsToMany('App\Models\Prestashop\Image',  'id_product');
+    }
+
+
     public function manufacturer()
     {
         return $this->belongsToMany('App\Models\Prestashop\Manufacturer',  'id_manufacturer');

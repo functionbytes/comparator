@@ -8,3 +8,4 @@ use Illuminate\Support\Facades\Route;
 // });
 
 Route::get('/', [SyncProductsController::class, 'sync']);
+// Route::get('/', [SyncProductsController::class, 'xml']);

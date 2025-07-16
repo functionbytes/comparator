@@ -66,6 +66,8 @@ class SyncProductsController extends Controller
                             ->keyBy('iso_code');
 
                         foreach ($prestashopProducts as $psProduct) {
+                            // dd($psProduct);
+                            // dd($psProduct->images);
 
                             $combinations = $psProduct->combinations;
                             $langs = $psProduct->langs;
@@ -97,6 +99,22 @@ class SyncProductsController extends Controller
                                 $psLang = $prestashopLangs->get($lang->id_lang);
                                 $localLang = $localLangs->get($psLang->iso_code);
 
+
+
+
+                                $image = DB::connection('prestashop')
+                                        ->table('aalv_product as a')
+                                        ->leftJoin('aalv_image as a2', function ($join) {
+                                            $join->on('a.id_product', '=', 'a2.id_product')
+                                                ->where('a2.cover', true);
+                                        })
+                                        ->join('aalv_product_lang as a3', 'a.id_product', '=', 'a3.id_product')
+                                        ->where('a.id_product', $comparatorProduct->id)
+                                        ->where('a3.id_lang', $localLang->id)
+                                        ->select(DB::raw("CONCAT('https://www.a-alvarez.com/', a2.id_image, '-home_default/', a3.link_rewrite, '.jpg') as image"))
+                                        ->first();
+                                dd($image);
+
                                 $langProduct = ProductLang::firstOrCreate([
                                     'product_id' => $comparatorProduct->id,
                                     'lang_id' => $localLang->id,
@@ -121,6 +139,18 @@ class SyncProductsController extends Controller
                                                     2
                                                 );
                                             }
+
+                                            if (!is_array($combination->id_product_attribute)) {
+                                                $ids = [$combination->id_product_attribute];
+                                            } else {
+                                                $ids = $combination->id_product_attribute;
+                                            }
+
+                                            $dato_gestion = DB::connection('prestashop')
+                                                ->table('aalv_combinaciones_import')
+                                                ->whereIn('id_product_attribute', $ids)
+                                                ->get();
+
                                             ProductReference::updateOrCreate([
                                                 'reference' => $combination->reference,
                                                 'combination_id' => $combination->id_product,
@@ -151,6 +181,17 @@ class SyncProductsController extends Controller
                                                 2
                                             );
                                         }
+
+                                         if (!is_array($comparatorProduct->id)) {
+                                            $ids = [$comparatorProduct->id];
+                                        } else {
+                                            $ids = $comparatorProduct->id;
+                                        }
+
+                                        $dato_gestion = DB::connection('prestashop')
+                                                ->table('aalv_combinacionunica_import')
+                                                ->whereIn('id_product', $ids)
+                                                ->get();
 
                                         ProductReference::updateOrCreate([
                                             'reference' => $psProduct->reference,
@@ -309,45 +350,59 @@ class SyncProductsController extends Controller
     {
         $lang = Lang::iso($lang);
 
+        // dd($lang->id);
+
         $products = Product::with([
             'references' => fn($q) => $q->where('lang_id', $lang->id),
-            'langs' => fn($q) => $q->where('lang_id', $lang->id),
+            // 'langs' => fn($q) => $q->where('lang_id', $lang->id),
         ])
             ->where('available', 1)
             ->take(5)
             ->get();
 
-
+// dd($products->langs );
         $xml = new \SimpleXMLElement('<products/>');
-
+            // dd($products);
         foreach ($products as $product) {
             // Solo la primera coincidencia, ya que solo hay un lang por ID
+            // $productLang = $product->langs->first();
+            // $ref = $product->references->first(); // ya filtrado por lang_id
             $productLang = $product->langs->first();
+            // dd($productLang);
 
             foreach ($product->references as $reference) {
                 $productXml = $xml->addChild('product');
                 $productXml->addChild('id', htmlspecialchars($reference->reference));
-
+                // dd($productLang->pivot->title);
                 if ($productLang) {
-                    $productXml->addChild('name', htmlspecialchars($productLang->title));
-                    $productXml->addChild('url', htmlspecialchars($productLang->url));
-                    $productXml->addChild('price', number_format($productLang->price, 2, '.', ''));
+                    $productXml->addChild('name', htmlspecialchars($productLang->pivot->title));
+                    $productXml->addChild('url', htmlspecialchars($productLang->pivot->url));
+                    $productXml->addChild('price', number_format($productLang->pivot->price, 2, '.', ''));
                 } else {
                     $productXml->addChild('name', '');
                     $productXml->addChild('url', '');
                     $productXml->addChild('price', '');
                 }
-
+                // dd($product->manufacturer_id);
                 $productXml->addChild('shop', '');
-                $productXml->addChild('brand', $product->manufacturer?->title);
-                $productXml->addChild('ean', $product->ean);
+                $productXml->addChild('brand', $product->manufacturer_id); // Falta Nombre
+
+                // Nos falta detectar si todos los precios son iguales para enviar todos los ean
+                if($product->ean != ''){
+                    $productXml->addChild('ean', $product->ean);
+                }else{
+                    $productXml->addChild('upc', $product->upc);
+                }
+                // dd($product);
                 $productXml->addChild('tag', '');
                 $productXml->addChild('stock', $productLang->stock > 0 ? 'true' : 'false');
                 $productXml->addChild('internal_status', $reference->available ? 'Activo' : 'Inactivo');
                 $productXml->addChild('codigo_proveedor', '');
+                $productXml->addChild('category', $product->category_id);
+                $productXml->addChild('image', '');
 
 
-
+                dd($productXml);
             }
 
         }

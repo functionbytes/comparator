@@ -6,12 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Jobs\Prestashop\SynchronizationProducts;
 use App\Models\Lang;
 use App\Models\Manufacturer;
-use App\Models\Prestashop\Product\Product as PrestashopProduct;
+use App\Models\Prestashop\Lang as PrestashopLang;
 use App\Models\Prestashop\Manufacturer as PrestashopManufacturer;
-
+use App\Models\Prestashop\Product\Product as PrestashopProduct;
 use App\Models\Product;
 use App\Models\ProductLang;
-use App\Models\ProductPriceHistory;
 use App\Models\ProductReference;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -54,20 +53,10 @@ class SyncProductsController extends Controller
                         }
 
                         $prestashopLangIds = array_unique($prestashopLangIds);
-
-                        $prestashopLangs = DB::connection('prestashop')
-                            ->table('aalv_lang')
-                            ->whereIn('id_lang', $prestashopLangIds)
-                            ->get()
-                            ->keyBy('id_lang');
-
-                        $localLangs = Lang::whereIn('iso_code', $prestashopLangs->pluck('iso_code'))
-                            ->get()
-                            ->keyBy('iso_code');
+                        $prestashopLangs = PrestashopLang::active()->byLangIds($prestashopLangIds)->get()->keyBy('id_lang');
+                        $localLangs = Lang::byIsoCodes($prestashopLangs->pluck('iso_code'))->get()->keyBy('iso_code');
 
                         foreach ($prestashopProducts as $psProduct) {
-                            // dd($psProduct);
-                            // dd($psProduct->images);
 
                             $combinations = $psProduct->combinations;
                             $langs = $psProduct->langs;
@@ -83,49 +72,33 @@ class SyncProductsController extends Controller
                                 $manufacturer = null;
                             }
 
-
                             $comparatorProduct = Product::firstOrCreate([
                                 'prestashop_id' => $psProduct->id_product,
-                                'ean' => $psProduct->ean,
-                                'upc' => $psProduct->upc,
                                 'category_id' => $psProduct->base_parent_category->id_category,
                                 'manufacturer_id' => $manufacturer,
                                 'available' => 1,
                                 'type' => count($combinations)>0 ? 'combination' : 'simple'
                             ]);
 
+                            $type = $comparatorProduct->type;
+
                             foreach ($langs as $lang) {
 
                                 $psLang = $prestashopLangs->get($lang->id_lang);
                                 $localLang = $localLangs->get($psLang->iso_code);
-
-
-
-
-                                $image = DB::connection('prestashop')
-                                        ->table('aalv_product as a')
-                                        ->leftJoin('aalv_image as a2', function ($join) {
-                                            $join->on('a.id_product', '=', 'a2.id_product')
-                                                ->where('a2.cover', true);
-                                        })
-                                        ->join('aalv_product_lang as a3', 'a.id_product', '=', 'a3.id_product')
-                                        ->where('a.id_product', $comparatorProduct->id)
-                                        ->where('a3.id_lang', $localLang->id)
-                                        ->select(DB::raw("CONCAT('https://www.a-alvarez.com/', a2.id_image, '-home_default/', a3.link_rewrite, '.jpg') as image"))
-                                        ->first();
-                                dd($image);
 
                                 $langProduct = ProductLang::firstOrCreate([
                                     'product_id' => $comparatorProduct->id,
                                     'lang_id' => $localLang->id,
                                     'title' => $lang->name,
                                     'url' => $lang->url,
+                                    'img' => $psProduct->getImageUrl($localLang->id),
                                     'price' =>  0.0,
                                 ]);
 
-                                switch ($comparatorProduct->type) {
-                                    case 'combination':
 
+                                switch ($type) {
+                                    case 'combination':
                                         foreach ($combinations as $combination) {
 
                                             $finalPriceWithIVA = 0.0;
@@ -146,11 +119,6 @@ class SyncProductsController extends Controller
                                                 $ids = $combination->id_product_attribute;
                                             }
 
-                                            $dato_gestion = DB::connection('prestashop')
-                                                ->table('aalv_combinaciones_import')
-                                                ->whereIn('id_product_attribute', $ids)
-                                                ->get();
-
                                             ProductReference::updateOrCreate([
                                                 'reference' => $combination->reference,
                                                 'combination_id' => $combination->id_product,
@@ -165,6 +133,7 @@ class SyncProductsController extends Controller
                                             $langProduct->price = $finalPriceWithIVA;
                                             $langProduct->available = $combination->stock?->quantity > 0;
                                             $langProduct->save();
+
                                         }
 
                                         break;
@@ -188,11 +157,6 @@ class SyncProductsController extends Controller
                                             $ids = $comparatorProduct->id;
                                         }
 
-                                        $dato_gestion = DB::connection('prestashop')
-                                                ->table('aalv_combinacionunica_import')
-                                                ->whereIn('id_product', $ids)
-                                                ->get();
-
                                         ProductReference::updateOrCreate([
                                             'reference' => $psProduct->reference,
                                             'combination_id' => null,
@@ -203,7 +167,7 @@ class SyncProductsController extends Controller
                                             'url' => null,
                                         ], []);
 
-                                        $langProduct->stock = $psProduct->stock?->quantity ?? 0;
+                                        $comparatorProduct->stock = $psProduct->stock?->quantity ?? 0;
                                         $langProduct->price = $finalPriceWithIVA;
                                         $langProduct->available = $psProduct->stock?->quantity > 0;
                                         $langProduct->save();
@@ -216,7 +180,15 @@ class SyncProductsController extends Controller
                                 }
 
 
+
                             }
+
+
+                            $ean = $psProduct->getFilterEan($ids,$type);
+                            dd($ean);
+
+                            $comparatorProduct->ean = $ean;
+                            $comparatorProduct->update();
                         }
 
 
@@ -245,7 +217,8 @@ class SyncProductsController extends Controller
 //                if($result_ps[0] != ''){
 //                    $modelo->nombre = $result_ps[0];
 //                }
-//
+//<tag>ADBF24, BF23, BF24, COMPARADOR, COMP_DE, COMP_FR, COMP_IT, COMP_PT, IVAJ25, IVANA24, PADRE25, PRECIO_FIJO, RBE24, RBE25, RBV25, RECOMENDADO, REVER242</tag>
+
 //        // Array de caracteristicas
 //                $caracteristicas_xml = [
 //                    3 => 'flexibility',
@@ -399,8 +372,7 @@ class SyncProductsController extends Controller
                 $productXml->addChild('internal_status', $reference->available ? 'Activo' : 'Inactivo');
                 $productXml->addChild('codigo_proveedor', '');
                 $productXml->addChild('category', $product->category_id);
-                $productXml->addChild('image', '');
-
+                $productXml->addChild('image', $productLang->img);
 
                 dd($productXml);
             }

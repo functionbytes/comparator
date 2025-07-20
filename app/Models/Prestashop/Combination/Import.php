@@ -1,12 +1,12 @@
 <?php
 
-namespace App\Models\Prestashop\Banner;
+namespace App\Models\Prestashop\Combination;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Model;
 
-class Combination extends Model
+class Import extends Model
 {
 
     protected $connection = 'prestashop';
@@ -38,33 +38,15 @@ class Combination extends Model
         'updated_at'
     ];
 
-    public function scopeId($query ,$id)
+    public function scopeByProductIds($query, $ids)
     {
-        return $query->where('id', $id)->first();
+        return $query->whereIn('id_product_attribute', $ids);
     }
-
-    public function scopeUid($query, $uid)
-{
-        return $query->where('uid', $uid)->first();
-}
 
     public function scopeAvailable($query)
     {
-        return $query->where('active', 1);
+        return $query->where('activo', 1);
     }
-
-    public function langs(): HasMany
-    {
-        return $this->hasMany(BannerLang::class, 'banner_id', 'id');
-    }
-
-    public function scopeLang($query, $lang)
-    {
-        return $query->whereHas('langs', function ($q) use ($lang) {
-            $q->where('id_lang', $lang);
-        });
-    }
-
 
 
 }

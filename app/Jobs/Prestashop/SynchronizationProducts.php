@@ -98,7 +98,6 @@ class SynchronizationProducts implements ShouldQueue
                             $manufacturer = null;
                         }
 
-
                         $comparatorProduct = Product::firstOrCreate([
                             'prestashop_id' => $psProduct->id_product,
                             'ean' => $psProduct->ean,
@@ -125,6 +124,7 @@ class SynchronizationProducts implements ShouldQueue
                             switch ($comparatorProduct->type) {
                                 case 'combination':
 
+                                    dd('combination');
                                     foreach ($combinations as $combination) {
 
                                         $finalPriceWithIVA = 0.0;

@@ -2,6 +2,8 @@
 
 namespace App\Models\Prestashop\Product;
 
+use App\Models\Prestashop\Combination\Import as PrestashopCombinationImport;
+use App\Models\Prestashop\Combination\Unique as PrestashopCombinationUnique;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -14,6 +16,7 @@ class ProductAttribute extends Model
     public $timestamps = false;
 
     protected $fillable = [
+        'id_product_attribute',
         'id_product',
         'reference',
         'supplier_reference',
@@ -100,5 +103,42 @@ class ProductAttribute extends Model
 
         return $url;
     }
+
+    public function validationCombination(){
+
+        $product =  $this->product;
+        $combinations = $product->combinations;
+
+        $type = count($combinations)>0 ? 'combination' : 'simple';
+
+        switch ($type) {
+            case 'combination':
+
+                $data = $this->import;
+                break;
+
+            case 'simple':
+
+                $data = $this->unique;
+                break;
+
+            default:
+                break;
+        }
+
+        return $data->codigo_proveedor;
+    }
+
+
+    public function unique(): BelongsTo
+    {
+        return $this->belongsTo('App\Models\Prestashop\Combination\Unique' ,'id_product' ,'id_product_attribute');
+    }
+
+    public function import(): BelongsTo
+    {
+        return $this->belongsTo('App\Models\Prestashop\Combination\Import' ,'id_product_attribute' ,'id_product_attribute');
+    }
+
 
 }

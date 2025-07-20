@@ -29,6 +29,11 @@ class Lang extends Model
         'updated_at'
     ];
 
+    public function scopeByIsoCodes($query, $isoCodes)
+    {
+        return $query->whereIn('iso_code', $isoCodes);
+    }
+
     public function scopeDescending($query)
     {
         return $query->orderBy('created_at', 'desc');

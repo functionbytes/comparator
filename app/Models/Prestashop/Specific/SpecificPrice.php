@@ -22,6 +22,7 @@ class SpecificPrice extends Model
         'id_product',
         'id_shop',
         'id_shop_group',
+        'id_product_attribute',
         'id_currency',
         'id_country',
         'price',
@@ -47,7 +48,7 @@ class SpecificPrice extends Model
 
     public function productAttribute(): BelongsTo
     {
-        return $this->belongsTo('App\Models\Prestashop\Product\ProductAttribute');
+        return $this->belongsTo('App\Models\Prestashop\Product\ProductAttribute' ,'id_product_attribute' ,'id_product_attribute');
     }
 
     public function user(): BelongsTo

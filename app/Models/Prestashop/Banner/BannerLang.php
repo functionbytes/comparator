@@ -24,7 +24,7 @@ class BannerLang extends Model
 
     public function banner()
     {
-        return $this->belongsTo('App\Models\Prestashop\Banner\Combination', 'banner_id', 'id');
+        return $this->belongsTo('App\Models\Prestashop\Banner\Import', 'banner_id', 'id');
     }
 
     public function lang()

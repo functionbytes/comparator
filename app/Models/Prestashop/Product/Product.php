@@ -3,9 +3,11 @@
 namespace App\Models\Prestashop\Product;
 
 use App\Models\Prestashop\Category\Category;
+use App\Models\Prestashop\Combination\Import as PrestashopCombinationImport;
+use App\Models\Prestashop\Combination\Unique as PrestashopCombinationUnique;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Log;
 
 class Product extends Model
 {
@@ -103,6 +105,54 @@ class Product extends Model
         return $this->lang ? $this->lang->name : null;
     }
 
+    public function coverImage()
+    {
+        return $this->hasOne('App\Models\Prestashop\Image', 'id_product', 'id_product')->where('cover', true);
+    }
+
+    public function langById($idLang)
+    {
+        return $this->hasOne('App\Models\Prestashop\Product\ProductLang', 'id_product', 'id_product')->where('id_lang', $idLang);
+    }
+
+    public function getFilterEan($ids ,$type)
+    {
+
+        //$groupedByPrice = $this->prices->groupBy('price');
+        //$groupedByPrice = $this->prices;
+        $groupedByPrice = $this->prices->groupBy('price');
+
+        $eanPorPrecio = [];
+
+        foreach ($groupedByPrice as $price =>  $item) {
+            $ean = $item->values()->map(function ($value) {
+                return optional($value->productAttribute)->validationCombination();
+            })->filter()
+            ->implode(',');
+
+            $eanPorPrecio[$price] = $ean;
+        }
+
+        dd($groupedByPrice , $eanPorPrecio,$this);
+
+        return $ean;
+    }
+
+
+    public function getImageUrl($idLang = 1): ?string
+    {
+        $image = $this->coverImage()?->first();
+        $lang  = $this->langById($idLang)->first();
+
+        if ($image && $lang) {
+            return "https://www.a-alvarez.com/{$image->id_image}-home_default/{$lang->link_rewrite}.jpg";
+        }else{
+            return '';
+        }
+
+        return null;
+    }
+
     public function combinations()
     {
         return $this->hasMany('App\Models\Prestashop\Product\ProductAttribute', 'id_product', 'id_product');
@@ -134,6 +184,9 @@ class Product extends Model
     {
         return $this->hasMany('App\Models\Prestashop\Product\ProductLang', 'id_product');
     }
-
+    public function uniquecombinations()
+    {
+        return $this->hasMany('App\Models\Prestashop\Combination\Unique', 'id_product', 'id_product');
+    }
 
 }

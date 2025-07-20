@@ -25,6 +25,7 @@ class Product extends Model
         'article_id',
         'category_id',
         'type',
+        'stock',
         'available',
         'created_at',
         'updated_at',

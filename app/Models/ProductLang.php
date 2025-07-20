@@ -9,6 +9,7 @@ class ProductLang extends Model
 {
     use SoftDeletes;
 
+    protected $table = "product_lang";
     protected $primaryKey = 'product_id';
     public $incrementing = false; // si no es autoincremental
     public $timestamps = true; // si usas created_at y updated_at
@@ -20,7 +21,7 @@ class ProductLang extends Model
         'characteristics',
         'price',
         'url',
-        'stock',
+        'img',
         'comparator',
         'reduction',
         'available',
@@ -30,10 +31,9 @@ class ProductLang extends Model
         'product_id'     => 'integer',
         'lang_id'        => 'integer',
         'title'          => 'string',
-        'characteristics'=> 'string',
         'url'            => 'string',
+        'img'            => 'string',
         'price'          => 'decimal:2',
-        'stock'          => 'integer',
         'comparator'     => 'boolean',
         'reduction'      => 'decimal:6',
         'available'      => 'boolean',

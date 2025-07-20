@@ -27,6 +27,7 @@ class ProductReference extends Model
         'attribute_id'    => 'integer',
         'product_id'      => 'integer',
         'label'           => 'string',
+        'url'           => 'string',
         'available'       => 'boolean',
         'deleted_at'      => 'datetime',
         'created_at'      => 'datetime',

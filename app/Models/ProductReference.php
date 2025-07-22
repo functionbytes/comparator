@@ -15,6 +15,9 @@ class ProductReference extends Model
         'lang_id',
         'combination_id',
         'attribute_id',
+        'price',
+        'reduction',
+        'characteristics',
         'product_id',
         'available',
         'label',
@@ -25,9 +28,12 @@ class ProductReference extends Model
         'reference'       => 'string',
         'combination_id'  => 'integer',
         'attribute_id'    => 'integer',
+        'characteristics' => 'string',
         'product_id'      => 'integer',
         'label'           => 'string',
-        'url'           => 'string',
+        'price'           => 'decimal:2',
+        'reduction'       => 'decimal:6',
+        'url'             => 'string',
         'available'       => 'boolean',
         'deleted_at'      => 'datetime',
         'created_at'      => 'datetime',
@@ -71,6 +77,11 @@ class ProductReference extends Model
     {
         return $this->hasOne('App\Models\ProductLang', 'product_id', 'product_id')
             ->whereColumn('lang_id', 'lang_id');
+    }
+
+    public function management() // si solo uno
+    {
+        return $this->hasOne(ProductReferenceManagement::class, 'product_reference_id');
     }
 
 }

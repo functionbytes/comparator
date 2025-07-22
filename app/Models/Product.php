@@ -17,8 +17,6 @@ class Product extends Model
 
     protected $fillable = [
         'uid',
-        'ean',
-        'upc',
         'manufacturer_id',
         'provider_id',
         'prestashop_id',
@@ -50,7 +48,7 @@ class Product extends Model
     public function langss(): BelongsToMany
     {
         return $this->belongsToMany('App\Models\Lang', 'product_lang', 'product_id', 'lang_id')
-            ->withPivot('title', 'characteristics', 'url', 'price', 'stock', 'comparator', 'label')
+            ->withPivot('title', 'url', 'stock', 'comparator', 'label')
             ->withTimestamps();
     }
 
@@ -64,11 +62,9 @@ class Product extends Model
         )
         ->withPivot([
             'title',
-            'characteristics',
-            'price',
             'stock',
             'url',
-            'reduction',
+            'img',
             'comparator',
             'available',
         ])
@@ -80,6 +76,11 @@ class Product extends Model
         return $this->langs->firstWhere('id', $langId);
     }
 
-
+    public function manufacturer(): BelongsTo
+    {
+        // manufacturer_id vive en la propia tabla products
+        // Como sigue la convención, NO hace falta indicar claves:
+        return $this->belongsTo(Manufacturer::class);
+    }
 
 }

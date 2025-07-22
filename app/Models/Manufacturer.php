@@ -6,6 +6,7 @@ use App\Traits\HasUid;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Model;
+use App\Models\Product;
 
 class Manufacturer extends Model
 {
@@ -40,6 +41,12 @@ class Manufacturer extends Model
     public function scopeAvailable($query)
     {
         return $query->where('available', 1);
+    }
+
+    public function products(): HasMany
+    {
+        // manufacturer_id se encuentra en products
+        return $this->hasMany(Product::class);
     }
 
 

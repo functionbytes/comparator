@@ -18,12 +18,9 @@ class ProductLang extends Model
         'product_id',
         'lang_id',
         'title',
-        'characteristics',
-        'price',
         'url',
         'img',
         'comparator',
-        'reduction',
         'available',
     ];
 
@@ -33,9 +30,7 @@ class ProductLang extends Model
         'title'          => 'string',
         'url'            => 'string',
         'img'            => 'string',
-        'price'          => 'decimal:2',
         'comparator'     => 'boolean',
-        'reduction'      => 'decimal:6',
         'available'      => 'boolean',
         'created_at'     => 'datetime',
         'updated_at'     => 'datetime',

@@ -1,22 +1,34 @@
-SELECT
-CASE
-WHEN l.iso_code = 'ES' THEN
-CONCAT(
-'https://www.a-alvarez.com/',
-p.id_product,
-'-', pl.link_rewrite,
-IF(pa.id_product_attribute IS NOT NULL, CONCAT('?id_product_attribute=', pa.id_product_attribute), '')
-)
-ELSE
-CONCAT(
-'https://www.a-alvarez.com/',
-l.iso_code, '/',
-p.id_product, '-', pl.link_rewrite,
-IF(pa.id_product_attribute IS NOT NULL, CONCAT('?id_product_attribute=', pa.id_product_attribute), '')
-)
-END AS image_url
-FROM aalv_product p
-LEFT JOIN aalv_product_attribute pa ON pa.id_product = p.id_product
-INNER JOIN aalv_product_lang pl ON pl.id_product = p.id_product
-INNER JOIN aalv_lang l ON l.id_lang = pl.id_lang
-WHERE p.id_product IN (57, 55000);
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('product_lang', callback: function (Blueprint $table) {
+            $table->bigIncrements('id');
+            $table->unsignedBigInteger('product_id');
+            $table->unsignedBigInteger('lang_id');
+            $table->string('title')->nullable();
+            $table->integer('stock')->default(0);
+            $table->tinyInteger('comparator')->default(0);
+            $table->tinyInteger('available')->default(0);
+            $table->text('url')->nullable();
+            $table->text('img')->nullable();
+            $table->timestamps();
+            $table->softDeletes();
+            $table->foreign('product_id')->references('id') ->on('products')->onDelete('cascade');
+            $table->foreign('lang_id')->references('id')->on('langs')->onDelete('cascade');
+            $table->unique(['product_id', 'lang_id','id'], 'product_lang_unique');
+
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('product_lang');
+    }
+};

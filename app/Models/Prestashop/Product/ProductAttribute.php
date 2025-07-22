@@ -6,6 +6,8 @@ use App\Models\Prestashop\Combination\Import as PrestashopCombinationImport;
 use App\Models\Prestashop\Combination\Unique as PrestashopCombinationUnique;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Database\Eloquent\Builder;
 
 class ProductAttribute extends Model
 {
@@ -138,6 +140,55 @@ class ProductAttribute extends Model
     public function import(): BelongsTo
     {
         return $this->belongsTo('App\Models\Prestashop\Combination\Import' ,'id_product_attribute' ,'id_product_attribute');
+    }
+
+    /**
+     * Devuelve el string de atributos para ESTE product_attribute en el idioma indicado.
+     */
+    public function atributosString(int $idLang): ?string
+    {
+        return $this->getConnection() // <<< usa la conexión del modelo (prestashop)
+            ->table($this->getTable() . ' as pa')
+            ->join('aalv_product_attribute_combination as pac', 'pac.id_product_attribute', '=', 'pa.id_product_attribute')
+            ->join('aalv_attribute as a', 'a.id_attribute', '=', 'pac.id_attribute')
+            ->join('aalv_attribute_lang as al', function ($j) use ($idLang) {
+                $j->on('al.id_attribute', '=', 'a.id_attribute')
+                ->where('al.id_lang', '=', $idLang);
+            })
+            ->join('aalv_attribute_group as ag', 'ag.id_attribute_group', '=', 'a.id_attribute_group')
+            ->join('aalv_attribute_group_lang as agl', function ($j) use ($idLang) {
+                $j->on('agl.id_attribute_group', '=', 'ag.id_attribute_group')
+                ->where('agl.id_lang', '=', $idLang);
+            })
+            ->where('pa.id_product', $this->id_product)
+            ->where('pa.id_product_attribute', $this->id_product_attribute)
+            ->selectRaw("GROUP_CONCAT(CONCAT(agl.name, ': ', al.name) ORDER BY al.name SEPARATOR ' | ') AS atributos_string")
+            ->value('atributos_string');
+    }
+
+    /**
+     * Scope para traer el campo calculado en el SELECT.
+     * Uso: ProductAttribute::withAtributosString($langId)->get();
+     */
+    public function scopeWithAtributosString(Builder $query, int $idLang): Builder
+    {
+        $conn = DB::connection($this->getConnectionName());
+
+        $sub = $conn->table('aalv_product_attribute_combination as pac')
+            ->join('aalv_attribute as a', 'a.id_attribute', '=', 'pac.id_attribute')
+            ->join('aalv_attribute_lang as al', function ($j) use ($idLang) {
+                $j->on('al.id_attribute', '=', 'a.id_attribute')
+                ->where('al.id_lang', '=', $idLang);
+            })
+            ->join('aalv_attribute_group as ag', 'ag.id_attribute_group', '=', 'a.id_attribute_group')
+            ->join('aalv_attribute_group_lang as agl', function ($j) use ($idLang) {
+                $j->on('agl.id_attribute_group', '=', 'ag.id_attribute_group')
+                ->where('agl.id_lang', '=', $idLang);
+            })
+            ->whereColumn('pac.id_product_attribute', $this->getTable().'.id_product_attribute')
+            ->selectRaw("GROUP_CONCAT(CONCAT(agl.name, ': ', al.name) ORDER BY al.name SEPARATOR ' | ')");
+
+        return $query->addSelect(['atributos_string' => $sub]);
     }
 
 

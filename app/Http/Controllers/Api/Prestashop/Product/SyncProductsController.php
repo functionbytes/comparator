@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Prestashop\Product;
 
+use Illuminate\Support\Facades\Storage;
 use App\Http\Controllers\Controller;
 use App\Jobs\Prestashop\SynchronizationProducts;
 use App\Models\Lang;
@@ -9,6 +10,9 @@ use App\Models\Manufacturer;
 use App\Models\Prestashop\Lang as PrestashopLang;
 use App\Models\Prestashop\Manufacturer as PrestashopManufacturer;
 use App\Models\Prestashop\Product\Product as PrestashopProduct;
+use App\Models\ProductReferenceManagement;
+use App\Models\Prestashop\Combination\Import as PsCombImport;
+use App\Models\Prestashop\Combination\Unique as PsCombUnique;
 use App\Models\Product;
 use App\Models\ProductLang;
 use App\Models\ProductReference;
@@ -32,16 +36,262 @@ class SyncProductsController extends Controller
             ], 500);
         }
     }
+
     public function sync()
     {
 
         return
-            PrestashopProduct::with(['langs'])
+            PrestashopProduct::with(['langs', 'combinations'])
                 ->orderBy('id_product')
                 ->where('active', 1)
                 ->chunkById(200, function ($prestashopProducts) {
 
                     Log::info('Procesando lote de productos: ' . count($prestashopProducts));
+
+                    try {
+
+                        $prestashopLangIds = [];
+                        foreach ($prestashopProducts as $product) {
+                            foreach ($product->langs as $lang) {
+                                $prestashopLangIds[] = $lang->id_lang;
+                            }
+                        }
+
+                        $prestashopLangIds = array_unique($prestashopLangIds);
+                        $prestashopLangs = PrestashopLang::active()->byLangIds($prestashopLangIds)->get()->keyBy('id_lang');
+                        $localLangs = Lang::byIsoCodes($prestashopLangs->pluck('iso_code'))->get()->keyBy('iso_code');
+
+                        // -------- Prefetch etiquetas ----------
+                        $allProductIds        = $prestashopProducts->pluck('id_product')->unique()->values();
+                        $allCombinationIds    = $prestashopProducts->pluck('combinations.*.id_product_attribute')->flatten()->filter()->unique()->values()->toArray();
+
+                        $uniqueMap  = PsCombUnique::available()->byProductIds($allProductIds->all())->get()->keyBy('id_product');
+                        $importMap  = PsCombImport::available()->byProductIds($allCombinationIds)->get()->keyBy('id_product_attribute');
+
+
+                        foreach ($prestashopProducts as $psProduct) {
+
+                            $combinations = $psProduct->combinations;
+                            $langs = $psProduct->langs;
+
+                            if($psProduct->id_manufacturer != 0){
+                                $psManufacturer = PrestashopManufacturer::id($psProduct->id_manufacturer);
+                                $comparatorManufacturer = Manufacturer::firstOrCreate(
+                                    ['title' => $psManufacturer->name],
+                                    ['available' => 1]
+                                );
+                                $manufacturer = $comparatorManufacturer->id;
+                            }else{
+                                $manufacturer = null;
+                            }
+
+                            $comparatorProduct = Product::firstOrCreate([
+                                'prestashop_id' => $psProduct->id_product,
+                                'category_id' => $psProduct->defaultCategory!=null ? $psProduct->base_parent_category->id_category : null,
+                                'manufacturer_id' => $manufacturer,
+                                'available' => 1,
+                                'type' => count($combinations)>0 ? 'combination' : 'simple'
+                            ]);
+
+                            $type = $comparatorProduct->type;
+
+                            foreach ($langs as $lang) {
+
+                                $psLang = $prestashopLangs->get($lang->id_lang);
+
+                                $localLang = $localLangs->get($psLang->iso_code);
+
+                                $langProduct = ProductLang::firstOrCreate([
+                                    'product_id' => $comparatorProduct->id,
+                                    'lang_id' => $localLang->id,
+                                    'title' => $lang->name,
+                                    'url' => $lang->url,
+                                    'img' => $psProduct->getImageUrl($localLang->id)
+                                ]);
+
+
+                                switch ($type) {
+                                    case 'combination':
+                                        foreach ($combinations as $combination) {
+                                            // dd($combination);
+                                            $atributosString = $combination->atributosString($localLang->id);
+
+                                            $finalPriceWithIVA = 0.0;
+                                            $prices = $combination->prices;
+                                            $specificPrice = $prices->firstWhere('from_quantity', 1);
+
+                                            if ($specificPrice) {
+                                                $finalPriceWithIVA = round(
+                                                    ((float) $specificPrice->price - (float) $specificPrice->reduction)
+                                                    * (1 + (float) $localLang->iva / 100),
+                                                    2
+                                                );
+                                            }
+
+                                            $pr = ProductReference::updateOrCreate([
+                                                'reference' => $combination->reference,
+                                                'combination_id' => $combination->id_product,
+                                                'product_id' => $comparatorProduct->id,
+                                                'lang_id' => $localLang->id,
+                                                'available' => $combination->stock?->quantity > 0,
+                                                'attribute_id' => $combination->id_product_attribute,
+                                                'characteristics' => $atributosString,
+                                                'price' => $finalPriceWithIVA,
+                                                'url' => null,
+                                            ], []);
+
+                                            // Tags solo para el lang configurado
+                                            if ($localLang->id == 1) {
+                                                $src = $importMap->get($combination->id_product_attribute);
+                                                $etiqueta = optional($importMap->get($combination->id_product_attribute))->etiqueta;
+                                                ProductReferenceManagement::updateOrCreate(
+                                                    ['product_reference_id' => $pr->id],
+                                                    [
+                                                        'tags'                   => $etiqueta,
+                                                        'id_articulo'            => $src->id_articulo ?? null,
+                                                        'unidades_oferta'        => $src->unidades_oferta ?? null,
+                                                        'estado_gestion'         => $src->estado_gestion ?? null,
+                                                        'es_segunda_mano'        => $src->es_segunda_mano ?? 0,
+                                                        'externo_disponibilidad' => $src->externo_disponibilidad ?? 0,
+                                                        'codigo_proveedor'       => $src->codigo_proveedor ?? null,
+                                                        'precio_costo_proveedor' => $src->precio_costo_proveedor ?? null,
+                                                        'tarifa_proveedor'       => $src->tarifa_proveedor ?? null,
+                                                        'es_arma'                => $src->es_arma ?? 0,
+                                                        'es_arma_fogueo'         => $src->es_arma_fogueo ?? 0,
+                                                        'es_cartucho'            => $src->es_cartucho ?? 0,
+                                                        'ean'                    => $src->ean ?? 0,
+                                                        'upc'                    => $src->upc ?? 0,
+                                                    ]
+                                                );
+                                            }
+
+                                            $langProduct->stock = $combination->stock?->quantity ?? 0;
+                                            $langProduct->available = $combination->stock?->quantity > 0;
+                                            $langProduct->save();
+
+                                        }
+
+                                        break;
+
+                                    case 'simple':
+
+                                        $finalPriceWithIVA = 0.0;
+                                        $specificPrice = $psProduct->prices->firstWhere('from_quantity', 1);
+
+                                        if ($specificPrice) {
+                                            $finalPriceWithIVA = round(
+                                                ((float) $specificPrice->price - (float) $specificPrice->reduction)
+                                                * (1 + (float) $localLang->iva / 100),
+                                                2
+                                            );
+                                        }
+
+                                        $pr = ProductReference::updateOrCreate([
+                                            'reference' => $psProduct->reference,
+                                            'combination_id' => null,
+                                            'product_id' => $comparatorProduct->id,
+                                            'lang_id' => $localLang->id,
+                                            'available' => $psProduct->stock?->quantity > 0,
+                                            'attribute_id' => null,
+                                            'characteristics' => null,
+                                            'price' => $finalPriceWithIVA,
+                                            'url' => null,
+                                        ], []);
+
+                                        if ($localLang->id == 1) {
+                                            $src = $uniqueMap->get($psProduct->id_product);
+                                            $etiqueta = optional($uniqueMap->get($psProduct->id_product))->etiqueta;
+                                            ProductReferenceManagement::updateOrCreate(
+                                                    ['product_reference_id' => $pr->id],
+                                                    [
+                                                        'tags'                   => $etiqueta,
+                                                        'id_articulo'            => $src->id_articulo ?? null,
+                                                        'unidades_oferta'        => $src->unidades_oferta ?? null,
+                                                        'estado_gestion'         => $src->estado_gestion ?? null,
+                                                        'es_segunda_mano'        => $src->es_segunda_mano ?? 0,
+                                                        'externo_disponibilidad' => $src->externo_disponibilidad ?? 0,
+                                                        'codigo_proveedor'       => $src->codigo_proveedor ?? null,
+                                                        'precio_costo_proveedor' => $src->precio_costo_proveedor ?? null,
+                                                        'tarifa_proveedor'       => $src->tarifa_proveedor ?? null,
+                                                        'es_arma'                => $src->es_arma ?? 0,
+                                                        'es_arma_fogueo'         => $src->es_arma_fogueo ?? 0,
+                                                        'es_cartucho'            => $src->es_cartucho ?? 0,
+                                                        'ean'                    => $src->ean ?? 0,
+                                                        'upc'                    => $src->upc ?? 0,
+                                                    ]
+                                                );
+                                        }
+
+                                        $comparatorProduct->stock = $psProduct->stock?->quantity ?? 0;
+                                        $langProduct->available = $psProduct->stock?->quantity > 0;
+                                        $langProduct->save();
+
+                                        break;
+
+                                    default:
+                                        Log::warning("Tipo de producto desconocido para ID {$psProduct->id_product}");
+                                        break;
+                                }
+                            }
+                        }
+
+
+                    } catch (Throwable $e) {
+                        Log::error('Error during product sync chunk: ' . $e->getMessage(), [
+                            'trace' => $e->getTraceAsString()
+                        ]);
+                    }
+                });
+
+    }
+
+    public function sync_copi()
+    {
+
+        return PrestashopProduct::with(['langs'])
+                ->orderBy('id_product')
+                ->where('active', 1)
+                ->chunkById(1, function ($prestashopProducts) {
+
+                    // 1) Log original
+                    Log::info('Procesando lote de productos (antes de filtrar): ' . count($prestashopProducts));
+
+                    // 2) Filtramos según la categoría y el precio (sin IVA)
+                    $prestashopProducts = $prestashopProducts->filter(function ($psProduct) {
+
+
+                        // Obtenemos el precio base (from_quantity = 1), según si tiene combinaciones o es simple
+                        if ($psProduct->combinations->isNotEmpty()) {
+                            // Para productos con combinaciones, tomamos el primer precio de la primera combinación
+                            $firstCombination = $psProduct->combinations->first();
+                            $specificPrice   = $firstCombination->prices->firstWhere('from_quantity', 1);
+
+                        } else {
+                            // Para productos simples, precio directo
+                            $specificPrice = $psProduct->prices->firstWhere('from_quantity', 1);
+                        }
+
+
+                        // Si no hay precio definido, descartamos
+                        if (! $specificPrice) {
+                            return false;
+                        }
+
+                        // Calculamos precio neto (sin IVA) o con IVA si lo prefieres aquí
+                        $netPrice = (float) $specificPrice->price - (float) $specificPrice->reduction;
+
+                        // Sacamos la categoría principal (la que usas luego en el 'category_id' del comparador)
+                        $categoryId = optional($psProduct->defaultCategory)->id_category;
+
+                        // Umbral: si categoría 5 => >20€, resto => >40€
+                        $threshold = ($categoryId === 5) ? 20 : 40;
+
+                        return $netPrice > $threshold;
+                    });
+
+                    // 3) Log tras el filtrado
+                    Log::info('Procesando lote de productos (tras filtrar): ' . count($prestashopProducts));
+
 
                     try {
 
@@ -74,7 +324,7 @@ class SyncProductsController extends Controller
 
                             $comparatorProduct = Product::firstOrCreate([
                                 'prestashop_id' => $psProduct->id_product,
-                                'category_id' => $psProduct->base_parent_category->id_category,
+                                'category_id' => $psProduct->defaultCategory!=null ? $psProduct->base_parent_category->id_category : null,
                                 'manufacturer_id' => $manufacturer,
                                 'available' => 1,
                                 'type' => count($combinations)>0 ? 'combination' : 'simple'
@@ -103,20 +353,15 @@ class SyncProductsController extends Controller
 
                                             $finalPriceWithIVA = 0.0;
                                             $prices = $combination->prices;
-                                            $specificPrice = $prices->firstWhere('from_quantity', 1);
+                                            $specificPrice = $prices->first();
 
-                                            if ($specificPrice) {
+                                            if (isset($specificPrice)) {
+                                                // dd($specificPrice->price);
                                                 $finalPriceWithIVA = round(
                                                     ((float) $specificPrice->price - (float) $specificPrice->reduction)
                                                     * (1 + (float) $localLang->iva / 100),
                                                     2
                                                 );
-                                            }
-
-                                            if (!is_array($combination->id_product_attribute)) {
-                                                $ids = [$combination->id_product_attribute];
-                                            } else {
-                                                $ids = $combination->id_product_attribute;
                                             }
 
                                             ProductReference::updateOrCreate([
@@ -129,9 +374,13 @@ class SyncProductsController extends Controller
                                                 'url' => null,
                                             ], []);
 
-                                            $langProduct->stock = $combination->stock?->quantity ?? 0;
+                                            // if($finalPriceWithIVA == '0.0'){
+                                            //     dd($psProduct->id_product,$finalPriceWithIVA,$specificPrice,$combination);
+                                            // }
+
+                                            $comparatorProduct->stock = $psProduct->stock?->quantity ?? 0;
                                             $langProduct->price = $finalPriceWithIVA;
-                                            $langProduct->available = $combination->stock?->quantity > 0;
+                                            $langProduct->available = $psProduct->stock?->quantity > 0;
                                             $langProduct->save();
 
                                         }
@@ -141,20 +390,14 @@ class SyncProductsController extends Controller
                                     case 'simple':
 
                                         $finalPriceWithIVA = 0.0;
-                                        $specificPrice = $psProduct->prices->firstWhere('from_quantity', 1);
+                                        $specificPrice = $psProduct->prices->first();
 
-                                        if ($specificPrice) {
+                                        if (isset($specificPrice)) {
                                             $finalPriceWithIVA = round(
                                                 ((float) $specificPrice->price - (float) $specificPrice->reduction)
                                                 * (1 + (float) $localLang->iva / 100),
                                                 2
                                             );
-                                        }
-
-                                         if (!is_array($comparatorProduct->id)) {
-                                            $ids = [$comparatorProduct->id];
-                                        } else {
-                                            $ids = $comparatorProduct->id;
                                         }
 
                                         ProductReference::updateOrCreate([
@@ -178,17 +421,7 @@ class SyncProductsController extends Controller
                                         Log::warning("Tipo de producto desconocido para ID {$psProduct->id_product}");
                                         break;
                                 }
-
-
-
                             }
-
-
-                            $ean = $psProduct->getFilterEan($ids,$type);
-                            dd($ean);
-
-                            $comparatorProduct->ean = $ean;
-                            $comparatorProduct->update();
                         }
 
 
@@ -203,186 +436,160 @@ class SyncProductsController extends Controller
 
     function xmlItemProducto($producto, $portes_referencia,$resultado_arrays_correctos, $aOptionsByType, $idLangPs) {
 
-//        $modelo = $modeloDAO->get($producto->id_modelo);
-//    `
-//                $result_ps     = mysqli_fetch_array(mysqli_query($dbconPS, "select
-//                                            apl.name
-//                                        FROM
-//                                            aalv_product_import api
-//                                            left join aalv_product_lang apl on api.id_product = apl.id_product
-//                                        WHERE
-//                                            apl.id_lang = ".$idLangPs."
-//                                            AND api.id_modelo = ".$producto->id_modelo));
-//
-//                if($result_ps[0] != ''){
-//                    $modelo->nombre = $result_ps[0];
-//                }
-//<tag>ADBF24, BF23, BF24, COMPARADOR, COMP_DE, COMP_FR, COMP_IT, COMP_PT, IVAJ25, IVANA24, PADRE25, PRECIO_FIJO, RBE24, RBE25, RBV25, RECOMENDADO, REVER242</tag>
+        //        // Array de caracteristicas
+        //                $caracteristicas_xml = [
+        //                    3 => 'flexibility',
+        //                    11 => 'long',
+        //                    12 => 'model',
+        //                    20 => 'caliber',
+        //                    27 => 'weight',
+        //                    28 => 'diameter',
+        //                    101 => 'set',
+        //                    118 => 'increases',
+        //                    100000461 => 'cane_model',
+        //                    100000736 => 'coil',
+        //                    100001193 => 'reticle',
+        //                    100001535 => 'reel_size',
+        //                    100001953 => 'shotgun_caliber'
+        //                ];
+        //
+        //                $texto_opciones = '';
+        //                if (isset($producto->opciones) && !empty($producto->opciones)) {
+        //                    foreach ($producto->opciones as $key => $value) {
+        //                        if(isset($caracteristicas_xml[$key])){
+        //                            $ddatos = explode(':',$value);
+        //                            $ddatos = array_map('trim', $ddatos);
+        //                            $texto_opciones .= "<".$caracteristicas_xml[$key].">".htmlspecialchars($ddatos[1], ENT_XML1, 'UTF-8')."</".$caracteristicas_xml[$key].">\n";
+        //                        }
+        //                    }
+        //                }
+        //
+        //                $precio = number_format(round($producto->tarifa->precio,2),2,',','');
+        //                $categoria_principal = $modeloDAO->getCategoriaPrincipalByIdModelo($producto->id_modelo);
+        //
 
-//        // Array de caracteristicas
-//                $caracteristicas_xml = [
-//                    3 => 'flexibility',
-//                    11 => 'long',
-//                    12 => 'model',
-//                    20 => 'caliber',
-//                    27 => 'weight',
-//                    28 => 'diameter',
-//                    101 => 'set',
-//                    118 => 'increases',
-//                    100000461 => 'cane_model',
-//                    100000736 => 'coil',
-//                    100001193 => 'reticle',
-//                    100001535 => 'reel_size',
-//                    100001953 => 'shotgun_caliber'
-//                ];
-//
-//                $texto_opciones = '';
-//                if (isset($producto->opciones) && !empty($producto->opciones)) {
-//                    foreach ($producto->opciones as $key => $value) {
-//                        if(isset($caracteristicas_xml[$key])){
-//                            $ddatos = explode(':',$value);
-//                            $ddatos = array_map('trim', $ddatos);
-//                            $texto_opciones .= "<".$caracteristicas_xml[$key].">".htmlspecialchars($ddatos[1], ENT_XML1, 'UTF-8')."</".$caracteristicas_xml[$key].">\n";
-//                        }
-//                    }
-//                }
-//
-//                $precio = number_format(round($producto->tarifa->precio,2),2,',','');
-//                $categoria_principal = $modeloDAO->getCategoriaPrincipalByIdModelo($producto->id_modelo);
-//
-//                $texto_marca = '<brand><![CDATA['.trim($marca->nombre).']]></brand>';
-//
-//                $texto_ean = '<ean>'.implode(',',$producto->alternativeEans).'</ean>';
-//
-//                $texto_upc = '<upc>'.implode(',',$producto->alternativeUpcs).'</upc>';
-//
-//                $texto_tag = '<tag>'.trim($producto->etiqueta).'</tag>';
-//
-//                $array_ruta_categoria = array();
-//
-//                $texto_stock .= '<stock>true</stock>';
-//
-//                $texto_estado_gestion = '';
-//                switch ($producto->estado_gestion) {
-//                    case '0': $texto_estado_gestion='<internal_status>Anulado</internal_status>';break;
-//                    case '1': $texto_estado_gestion='<internal_status>Activo</internal_status>';break;
-//                    case '2': $texto_estado_gestion='<internal_status>A extinguir</internal_status>';break;
-//                }
-//
-//                $texto_precio_costo_proveedor = '';
-//
-//                $texto_codigo_proveedor = '<codigo_proveedor>'.$producto->codigo_proveedor.'</codigo_proveedor>';
-//
-//                /** Precio unitario **/
-//                $texto_unidades = '';
-//                $texto_precio_unitario = '';
-//                if ($producto->unidades_oferta > 1) {
-//                    $texto_unidades = '<unit>unidades</unit>';
-//                    $precio_unitario = number_format(round($producto->tarifa->precio/$producto->unidades_oferta,2),2,',','');
-//                    $texto_precio_unitario = '<price_unit>'.$precio_unitario.'</price_unit>';
-//                }
-//
-//        // Salida de los datos del XML
-//                $output = '
-//            <product>
-//                <id>';
-//
-//                $output .= $producto->referencia;
-//
-//                $prodPS = $productPSDAO->getProductByModelId($modelo->id, $app->currentLanguage());
-//
-//                $canonical = 'https://www.a-alvarez.com/' . $prodPS->link;
-//                $ruta_imagen = 'https://www.a-alvarez.com/' . $prodPS->image;
-//
-//                $output .='</id>
-//                <url><![CDATA['.$canonical.']]></url>
-//                <name><![CDATA['.$modelo->nombre.']]></name>
-//                <price>'.$precio.'</price>
-//                <image><![CDATA['.$ruta_imagen.']]></image>
-//                <category><![CDATA['.implode(' > ', $array_ruta_categoria).']]></category>
-//                <shop><![CDATA['.((is_array($array_ruta_categoria) && !empty($array_ruta_categoria[0])) ? $array_ruta_categoria[0] : '').']]></shop>
-//                '.$texto_marca.'
-//                '.$texto_ean.'
-//                '.$texto_upc.'
-//                '.$texto_tag.'
-//                '.$texto_stock.'
-//                '.$texto_estado_gestion.'
-//                '.$texto_codigo_proveedor.'
-//                '.$texto_precio_costo_proveedor.'
-//                '.$texto_unidades.'
-//                '.$texto_precio_unitario.'
-//                '.$texto_opciones.'
-//            </product>
-//        ';
-//`
+        //
+
+        //
+        //                $array_ruta_categoria = array();
+
+        //                /** Precio unitario **/
+        //                $texto_unidades = '';
+        //                $texto_precio_unitario = '';
+        //                if ($producto->unidades_oferta > 1) {
+        //                    $texto_unidades = '<unit>unidades</unit>';
+        //                    $precio_unitario = number_format(round($producto->tarifa->precio/$producto->unidades_oferta,2),2,',','');
+        //                    $texto_precio_unitario = '<price_unit>'.$precio_unitario.'</price_unit>';
+        //                }
+        //
+        //        // Salida de los datos del XML
+        //                $output = '
+        //            <product>
+        //
+
+        //                '.$texto_unidades.'
+        //                '.$texto_precio_unitario.'
+        //                '.$texto_opciones.'
+        //            </product>
+        //        ';
+        //`
         //      return $output;
     }
 
-
-    public function xml($lang = 'es')
+    public function xml(string $langIso = 'es')
     {
-        $lang = Lang::iso($lang);
+        // 1) Idioma
+        $lang = Lang::iso($langIso);
 
-        // dd($lang->id);
+        // 2) Raíz del XML
+        $xml = new \SimpleXMLElement('<?xml version="1.0" encoding="UTF-8"?><products/>');
 
-        $products = Product::with([
-            'references' => fn($q) => $q->where('lang_id', $lang->id),
-            // 'langs' => fn($q) => $q->where('lang_id', $lang->id),
-        ])
-            ->where('available', 1)
-            ->take(5)
-            ->get();
+        // 3) Consulta por lotes (idéntica a la anterior)
+        Product::where('available', 1)
+            ->whereHas('langs', function ($q) use ($lang) {
+                $q->where('lang_id', $lang->id);
+            })
+            ->with([
+                'langs'        => fn ($q) => $q->where('lang_id', $lang->id),
+                'references' => fn ($q) => $q->where('lang_id', $lang->id)->with('management'),
+                'manufacturer:id,title',
+            ])
+            ->chunk(1, function ($products) use (&$xml) {
 
-// dd($products->langs );
-        $xml = new \SimpleXMLElement('<products/>');
-            // dd($products);
-        foreach ($products as $product) {
-            // Solo la primera coincidencia, ya que solo hay un lang por ID
-            // $productLang = $product->langs->first();
-            // $ref = $product->references->first(); // ya filtrado por lang_id
-            $productLang = $product->langs->first();
-            // dd($productLang);
+                foreach ($products as $product) {
+                    $productLang = $product->langs->first();
+                    if (!$productLang) {
+                        continue;
+                    }
 
-            foreach ($product->references as $reference) {
-                $productXml = $xml->addChild('product');
-                $productXml->addChild('id', htmlspecialchars($reference->reference));
-                // dd($productLang->pivot->title);
-                if ($productLang) {
-                    $productXml->addChild('name', htmlspecialchars($productLang->pivot->title));
-                    $productXml->addChild('url', htmlspecialchars($productLang->pivot->url));
-                    $productXml->addChild('price', number_format($productLang->pivot->price, 2, '.', ''));
-                } else {
-                    $productXml->addChild('name', '');
-                    $productXml->addChild('url', '');
-                    $productXml->addChild('price', '');
+                    foreach ($product->references as $reference) {
+                        $price    = (float) $reference->price;
+                        $minPrice = $product->category_id == 5 ? 20 : 40;
+                        if ($price <= $minPrice) {
+                            continue;
+                        }
+
+                        if($reference->management->estado_gestion == 0){
+                            continue;
+                        }
+
+                        $p = $xml->addChild('product');
+
+                        $p->addChild('id',        htmlspecialchars($reference->reference));
+                        $p->addChild('url',       htmlspecialchars($productLang->pivot->url));
+                        $p->addChild('name',      htmlspecialchars($productLang->pivot->title));
+                        $p->addChild('price',     number_format($reference->price, 2, '.', ''));
+                        $p->addChild('image',     htmlspecialchars($productLang->pivot->img));
+                        $p->addChild('shop',      '');
+                        $p->addChild('brand',     htmlspecialchars($product->manufacturer?->title));
+                        $reference->management->ean
+                            ? $p->addChild('ean', $reference->management->ean)
+                            : $p->addChild('upc', $reference->management->upc);
+                        $p->addChild('tag', $reference->management->tags);
+                        $p->addChild('stock',     $productLang->pivot->stock > 0 ? 'true' : 'false');
+                        switch ($reference->management->estado_gestion) {
+                           case '0': $p->addChild('internal_status', 'Anulado');break;
+                           case '1': $p->addChild('internal_status', 'Activo');break;
+                           case '2': $p->addChild('internal_status', 'A extinguir');break;
+                        }
+                        // $p->addChild('internal_status', $reference->available ? 'Activo' : 'Inactivo');
+                        $p->addChild('codigo_proveedor', $reference->management->codigo_proveedor);
+                        // $p->addChild('category',  (string) $product->category_id);
+                        $p->addChild('category',  '');
+                        // dd($reference,$p);
+
+                    }
                 }
-                // dd($product->manufacturer_id);
-                $productXml->addChild('shop', '');
-                $productXml->addChild('brand', $product->manufacturer_id); // Falta Nombre
+            });
 
-                // Nos falta detectar si todos los precios son iguales para enviar todos los ean
-                if($product->ean != ''){
-                    $productXml->addChild('ean', $product->ean);
-                }else{
-                    $productXml->addChild('upc', $product->upc);
-                }
-                // dd($product);
-                $productXml->addChild('tag', '');
-                $productXml->addChild('stock', $productLang->stock > 0 ? 'true' : 'false');
-                $productXml->addChild('internal_status', $reference->available ? 'Activo' : 'Inactivo');
-                $productXml->addChild('codigo_proveedor', '');
-                $productXml->addChild('category', $product->category_id);
-                $productXml->addChild('image', $productLang->img);
+        /* ----------------------------------------------------------
+        | 4) Guardar archivo
+        |    Ruta final: storage/app/xml/products_es.xml  (p. ej.)
+        * ---------------------------------------------------------- */
+        $dir  = 'xml';
+        $file = "products_{$lang->iso_code}.xml";
 
-                dd($productXml);
-            }
-
+        // Crea la carpeta si no existe
+        if (!Storage::disk('local')->exists($dir)) {
+            Storage::disk('local')->makeDirectory($dir);
         }
 
-        return response($xml->asXML(), 200)
-            ->header('Content-Type', 'application/xml');
+        Storage::disk('local')->put("{$dir}/{$file}", $xml->asXML());
 
+        /* ----------------------------------------------------------
+        | 5) Devolver respuesta
+        |    a) descarga directa   →  descomenta la línea download()
+        |    b) confirmación JSON  →  return ['path' => ...]
+        * ---------------------------------------------------------- */
 
+        // a) Descargar el archivo inmediatamente
+        // return response()->download(storage_path("app/{$dir}/{$file}"));
+
+        // b) Confirmar ruta en JSON
+        return response()->json([
+            'stored' => true,
+            'path'   => storage_path("app/{$dir}/{$file}"),
+        ]);
     }
 
     public function jobs()

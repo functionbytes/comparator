@@ -14,8 +14,6 @@ return new class extends Migration
         Schema::create('products', function (Blueprint $table) {
             $table->bigIncrements('id');
             $table->char('uid', 36)->unique();
-            $table->string('ean')->nullable();
-            $table->string('upc')->nullable();
             $table->unsignedBigInteger('manufacturer_id')->nullable();
             $table->unsignedBigInteger('provider_id')->nullable();
             $table->unsignedBigInteger('prestashop_id')->nullable();
@@ -25,9 +23,9 @@ return new class extends Migration
             $table->enum('type', ['simple', 'combination'])->nullable();
             $table->timestamps();
             $table->softDeletes();
-            $table->foreign('category_id')->references('id')->on('categories')->onDelete('cascade');
+            //$table->foreign('category_id')->references('id')->on('categories')->onDelete('cascade');
             $table->foreign('manufacturer_id')->references('id')->on('manufacturers')->onDelete('cascade');
-            $table->unique(['category_id', 'article_id', 'prestashop_id', 'provider_id'], 'product_prestashop_unique');
+            $table->unique(['article_id', 'prestashop_id', 'provider_id'], 'product_prestashop_unique');
         });
     }
 

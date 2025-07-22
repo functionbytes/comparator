@@ -18,7 +18,10 @@ return new class extends Migration
             $table->unsignedBigInteger('lang_id')->nullable();
             $table->unsignedBigInteger('combination_id')->nullable();
             $table->unsignedBigInteger('attribute_id')->nullable();
+            $table->text('characteristics')->nullable();
             $table->unsignedBigInteger('product_id')->nullable();
+            $table->decimal('price', 12, 2)->default(0.00);
+            $table->decimal('reduction', 20, 6)->default(0);
             $table->tinyInteger('available')->default(0);
             $table->softDeletes();
             $table->timestamps();

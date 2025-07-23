@@ -103,13 +103,19 @@ class SynchronizationProducts implements ShouldQueue
                                 $manufacturer = null;
                             }
 
-                            $comparatorProduct = Product::firstOrCreate([
-                                'prestashop_id' => $psProduct->id_product,
-                                'category_id' => $psProduct->defaultCategory!=null ? $psProduct->base_parent_category->id_category : null,
-                                'manufacturer_id' => $manufacturer,
-                                'available' => 1,
-                                'type' => count($combinations)>0 ? 'combination' : 'simple'
-                            ]);
+                            $categoryId = $psProduct->defaultCategory
+                                            ? optional($psProduct->base_parent_category)->id_category
+                                            : null;
+
+                            $comparatorProduct = Product::updateOrCreate(
+                                ['prestashop_id' => $psProduct->id_product], // solo la clave única/lookup
+                                [
+                                    'category_id'     => $categoryId,
+                                    'manufacturer_id' => $manufacturer,
+                                    'available'       => 1,
+                                    'type'            => $combinations->isNotEmpty() ? 'combination' : 'simple'
+                                ]
+                            );
 
                             $type = $comparatorProduct->type;
 
@@ -119,13 +125,17 @@ class SynchronizationProducts implements ShouldQueue
 
                                 $localLang = $localLangs->get($psLang->iso_code);
 
-                                $langProduct = ProductLang::firstOrCreate([
-                                    'product_id' => $comparatorProduct->id,
-                                    'lang_id' => $localLang->id,
-                                    'title' => $lang->name,
-                                    'url' => $lang->url,
-                                    'img' => $psProduct->getImageUrl($localLang->id)
-                                ]);
+                                $langProduct = ProductLang::updateOrCreate(
+                                    [
+                                        'product_id' => $comparatorProduct->id,
+                                        'lang_id'    => $localLang->id,
+                                    ],
+                                    [
+                                        'title' => $lang->name,
+                                        'url'   => $lang->url,
+                                        'img'   => $psProduct->getImageUrl($localLang->id),
+                                    ]
+                                );
 
 
                                 switch ($type) {
@@ -146,17 +156,21 @@ class SynchronizationProducts implements ShouldQueue
                                                 );
                                             }
 
-                                            $pr = ProductReference::updateOrCreate([
-                                                'reference' => $combination->reference,
-                                                'combination_id' => $combination->id_product,
-                                                'product_id' => $comparatorProduct->id,
-                                                'lang_id' => $localLang->id,
-                                                'available' => $combination->stock?->quantity > 0,
-                                                'attribute_id' => $combination->id_product_attribute,
-                                                'characteristics' => $atributosString,
-                                                'price' => $finalPriceWithIVA,
-                                                'url' => null,
-                                            ], []);
+                                            $pr = ProductReference::updateOrCreate(
+                                                [
+                                                    'reference'   => $combination->reference,
+                                                    'product_id'  => $comparatorProduct->id,
+                                                    'lang_id'     => $localLang->id,
+                                                ],
+                                                [
+                                                    'combination_id' => $combination->id_product_attribute,
+                                                    'available'      => $combination->stock?->quantity > 0,
+                                                    'attribute_id'   => $combination->id_product_attribute,
+                                                    'characteristics'=> $atributosString,
+                                                    'price'          => $finalPriceWithIVA,
+                                                    'url'            => null,
+                                                ]
+                                            );
 
                                             // Tags solo para el lang configurado
                                             if ($localLang->id == 1) {
@@ -204,17 +218,22 @@ class SynchronizationProducts implements ShouldQueue
                                             );
                                         }
 
-                                        $pr = ProductReference::updateOrCreate([
-                                            'reference' => $psProduct->reference,
-                                            'combination_id' => null,
-                                            'product_id' => $comparatorProduct->id,
-                                            'lang_id' => $localLang->id,
-                                            'available' => $psProduct->stock?->quantity > 0,
-                                            'attribute_id' => null,
-                                            'characteristics' => null,
-                                            'price' => $finalPriceWithIVA,
-                                            'url' => null,
-                                        ], []);
+                                        $pr = ProductReference::updateOrCreate(
+                                            [
+                                                'reference'  => $psProduct->reference,
+                                                'product_id' => $comparatorProduct->id,
+                                                'lang_id'    => $localLang->id,
+                                            ],
+                                            [
+                                                'combination_id' => null,
+                                                'available'      => $psProduct->stock?->quantity > 0,
+                                                'attribute_id'   => null,
+                                                'characteristics'=> null,
+                                                'price'          => $finalPriceWithIVA,
+                                                'url'            => null,
+                                            ]
+                                        );
+
 
                                         if ($localLang->id == 1) {
                                             $src = $uniqueMap->get($psProduct->id_product);
@@ -251,7 +270,6 @@ class SynchronizationProducts implements ShouldQueue
                                         break;
                                 }
                             }
-
                         }
 
 

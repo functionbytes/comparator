@@ -19,6 +19,8 @@ use App\Models\ProductReference;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Carbon;
+
 
 class SyncProductsController extends Controller
 {
@@ -85,29 +87,41 @@ class SyncProductsController extends Controller
                                 $manufacturer = null;
                             }
 
-                            $comparatorProduct = Product::firstOrCreate([
-                                'prestashop_id' => $psProduct->id_product,
-                                'category_id' => $psProduct->defaultCategory!=null ? $psProduct->base_parent_category->id_category : null,
-                                'manufacturer_id' => $manufacturer,
-                                'available' => 1,
-                                'type' => count($combinations)>0 ? 'combination' : 'simple'
-                            ]);
+                            $categoryId = $psProduct->defaultCategory
+                                            ? optional($psProduct->base_parent_category)->id_category
+                                            : null;
+
+                            $comparatorProduct = Product::updateOrCreate(
+                                ['prestashop_id' => $psProduct->id_product], // solo la clave única/lookup
+                                [
+                                    'category_id'     => $categoryId,
+                                    'manufacturer_id' => $manufacturer,
+                                    'available'       => 1,
+                                    'type'            => $combinations->isNotEmpty() ? 'combination' : 'simple'
+                                ]
+                            );
+
 
                             $type = $comparatorProduct->type;
-
+                            dump($psProduct->id_product);
+                            dump($psProduct->stock?->quantity);
                             foreach ($langs as $lang) {
 
                                 $psLang = $prestashopLangs->get($lang->id_lang);
 
                                 $localLang = $localLangs->get($psLang->iso_code);
 
-                                $langProduct = ProductLang::firstOrCreate([
-                                    'product_id' => $comparatorProduct->id,
-                                    'lang_id' => $localLang->id,
-                                    'title' => $lang->name,
-                                    'url' => $lang->url,
-                                    'img' => $psProduct->getImageUrl($localLang->id)
-                                ]);
+                                $langProduct = ProductLang::updateOrCreate(
+                                    [
+                                        'product_id' => $comparatorProduct->id,
+                                        'lang_id'    => $localLang->id,
+                                    ],
+                                    [
+                                        'title' => $lang->name,
+                                        'url'   => $lang->url,
+                                        'img'   => $psProduct->getImageUrl($localLang->id),
+                                    ]
+                                );
 
 
                                 switch ($type) {
@@ -128,17 +142,21 @@ class SyncProductsController extends Controller
                                                 );
                                             }
 
-                                            $pr = ProductReference::updateOrCreate([
-                                                'reference' => $combination->reference,
-                                                'combination_id' => $combination->id_product,
-                                                'product_id' => $comparatorProduct->id,
-                                                'lang_id' => $localLang->id,
-                                                'available' => $combination->stock?->quantity > 0,
-                                                'attribute_id' => $combination->id_product_attribute,
-                                                'characteristics' => $atributosString,
-                                                'price' => $finalPriceWithIVA,
-                                                'url' => null,
-                                            ], []);
+                                            $pr = ProductReference::updateOrCreate(
+                                                [
+                                                    'reference'   => $combination->reference,
+                                                    'product_id'  => $comparatorProduct->id,
+                                                    'lang_id'     => $localLang->id,
+                                                ],
+                                                [
+                                                    'combination_id' => $combination->id_product_attribute,
+                                                    'available'      => $combination->stock?->quantity > 0,
+                                                    'attribute_id'   => $combination->id_product_attribute,
+                                                    'characteristics'=> $atributosString,
+                                                    'price'          => $finalPriceWithIVA,
+                                                    'url'            => null,
+                                                ]
+                                            );
 
                                             // Tags solo para el lang configurado
                                             if ($localLang->id == 1) {
@@ -186,17 +204,22 @@ class SyncProductsController extends Controller
                                             );
                                         }
 
-                                        $pr = ProductReference::updateOrCreate([
-                                            'reference' => $psProduct->reference,
-                                            'combination_id' => null,
-                                            'product_id' => $comparatorProduct->id,
-                                            'lang_id' => $localLang->id,
-                                            'available' => $psProduct->stock?->quantity > 0,
-                                            'attribute_id' => null,
-                                            'characteristics' => null,
-                                            'price' => $finalPriceWithIVA,
-                                            'url' => null,
-                                        ], []);
+                                        $pr = ProductReference::updateOrCreate(
+                                            [
+                                                'reference'  => $psProduct->reference,
+                                                'product_id' => $comparatorProduct->id,
+                                                'lang_id'    => $localLang->id,
+                                            ],
+                                            [
+                                                'combination_id' => null,
+                                                'available'      => $psProduct->stock?->quantity > 0,
+                                                'attribute_id'   => null,
+                                                'characteristics'=> null,
+                                                'price'          => $finalPriceWithIVA,
+                                                'url'            => null,
+                                            ]
+                                        );
+
 
                                         if ($localLang->id == 1) {
                                             $src = $uniqueMap->get($psProduct->id_product);
@@ -514,52 +537,80 @@ class SyncProductsController extends Controller
                 'references' => fn ($q) => $q->where('lang_id', $lang->id)->with('management'),
                 'manufacturer:id,title',
             ])
-            ->chunk(1, function ($products) use (&$xml) {
+            ->chunk(100, function ($products) use (&$xml) {
 
                 foreach ($products as $product) {
+                    if($product->type == 'simple'){
+                        continue;
+                    }
+
                     $productLang = $product->langs->first();
                     if (!$productLang) {
                         continue;
                     }
 
-                    foreach ($product->references as $reference) {
+                    $validRefs = $product->references->filter(function ($reference) use ($product, $productLang) {
                         $price    = (float) $reference->price;
                         $minPrice = $product->category_id == 5 ? 20 : 40;
-                        if ($price <= $minPrice) {
-                            continue;
-                        }
 
-                        if($reference->management->estado_gestion == 0){
-                            continue;
-                        }
+                        $sinStock = ($productLang->pivot->stock ?? 0) <= 0; // ajusta si el stock está en otro sitio
+
+                        return $price > $minPrice
+                            && $reference->management->estado_gestion != 0
+                            && $reference->management->tags !== 'SEGUNDA MANO'
+                            // descarta los que están en estado 2 y sin stock
+                            && !($reference->management->estado_gestion == 2 && $sinStock);
+                    });
+
+                    if ($validRefs->isEmpty()) {
+                        continue;
+                    }
+
+                    // 2) Agrupar por precio normalizado (mismo precio => mismo product en el XML)
+                    $groups = $validRefs->groupBy(function ($r) {
+                        return number_format((float) $r->price, 2, '.', '');
+                    });
+
+                    // 3) Un product por grupo de precio
+                    foreach ($groups as $price => $refs) {
+
+                        $firstRef = $refs->first(); // reference "representante"
+
+                        // Concatenar EAN/UPC de todas las referencias del grupo (solo si hay más de una o por seguridad)
+                        $eanList = $refs->pluck('management.ean')->filter()->unique()->implode(',');
+                        $upcList = $refs->pluck('management.upc')->filter()->unique()->implode(',');
 
                         $p = $xml->addChild('product');
-
-                        $p->addChild('id',        htmlspecialchars($reference->reference));
+                        // SOLO una reference como id
+                        $p->addChild('id',        htmlspecialchars($firstRef->reference));
                         $p->addChild('url',       htmlspecialchars($productLang->pivot->url));
                         $p->addChild('name',      htmlspecialchars($productLang->pivot->title));
-                        $p->addChild('price',     number_format($reference->price, 2, '.', ''));
+                        $p->addChild('price',     $price);
                         $p->addChild('image',     htmlspecialchars($productLang->pivot->img));
                         $p->addChild('shop',      '');
                         $p->addChild('brand',     htmlspecialchars($product->manufacturer?->title));
-                        $reference->management->ean
-                            ? $p->addChild('ean', $reference->management->ean)
-                            : $p->addChild('upc', $reference->management->upc);
-                        $p->addChild('tag', $reference->management->tags);
-                        $p->addChild('stock',     $productLang->pivot->stock > 0 ? 'true' : 'false');
-                        switch ($reference->management->estado_gestion) {
-                           case '0': $p->addChild('internal_status', 'Anulado');break;
-                           case '1': $p->addChild('internal_status', 'Activo');break;
-                           case '2': $p->addChild('internal_status', 'A extinguir');break;
-                        }
-                        // $p->addChild('internal_status', $reference->available ? 'Activo' : 'Inactivo');
-                        $p->addChild('codigo_proveedor', $reference->management->codigo_proveedor);
-                        // $p->addChild('category',  (string) $product->category_id);
-                        $p->addChild('category',  '');
-                        // dd($reference,$p);
 
+                        if ($eanList !== '') {
+                            $p->addChild('ean', $eanList);
+                        }elseif ($upcList !== '') {
+                            $p->addChild('upc', $upcList);
+                        }
+
+                        $p->addChild('tag', $firstRef->management->tags);
+                        $p->addChild('stock', $productLang->pivot->stock > 0 ? 'true' : 'false');
+
+                        switch ($firstRef->management->estado_gestion) {
+                            case '0': $p->addChild('internal_status', 'Anulado');     break;
+                            case '1': $p->addChild('internal_status', 'Activo');      break;
+                            case '2': $p->addChild('internal_status', 'A extinguir'); break;
+                        }
+
+                        $p->addChild('codigo_proveedor', $firstRef->management->codigo_proveedor);
+                        $p->addChild('category', '');
+                        // dump($p);
                     }
                 }
+
             });
 
         /* ----------------------------------------------------------
@@ -567,7 +618,9 @@ class SyncProductsController extends Controller
         |    Ruta final: storage/app/xml/products_es.xml  (p. ej.)
         * ---------------------------------------------------------- */
         $dir  = 'xml';
-        $file = "products_{$lang->iso_code}.xml";
+        $timestamp = Carbon::now(config('app.timezone')) // o 'Europe/Madrid'
+                  ->format('Ymd_His');           // 20250723_154233
+        $file      = "products_{$lang->iso_code}_{$timestamp}.xml";
 
         // Crea la carpeta si no existe
         if (!Storage::disk('local')->exists($dir)) {
@@ -591,6 +644,128 @@ class SyncProductsController extends Controller
             'path'   => storage_path("app/{$dir}/{$file}"),
         ]);
     }
+
+    public function excel(string $langIso = 'es')
+    {
+        $timestamp = Carbon::now(config('app.timezone'))->format('Ymd_His');
+        $filename  = "products_{$langIso}_{$timestamp}.csv";
+
+        $headers = [
+            'Content-Type'        => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+            'Cache-Control'       => 'no-store, no-cache',
+        ];
+
+        return response()->streamDownload(function () use ($langIso) {
+
+            $out = fopen('php://output', 'w');
+
+            // BOM para UTF-8 (Excel)
+            fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF));
+
+            // Encabezados (mismos campos que el XML)
+            fputcsv($out, [
+                'id',
+                'url',
+                'name',
+                'price',
+                'image',
+                'shop',
+                'brand',
+                'ean',
+                'upc',
+                'tag',
+                'stock',
+                'internal_status',
+                'codigo_proveedor',
+                'category',
+            ]);
+
+            $lang = \App\Models\Lang::iso($langIso);
+
+            \App\Models\Product::where('available', 1)
+                ->whereHas('langs', fn ($q) => $q->where('lang_id', $lang->id))
+                ->with([
+                    'langs'        => fn ($q) => $q->where('lang_id', $lang->id),
+                    'references'   => fn ($q) => $q->where('lang_id', $lang->id)->with('management'),
+                    'manufacturer:id,title',
+                ])
+                ->chunk(100, function ($products) use ($out, $lang) {
+
+                    foreach ($products as $product) {
+
+                        // 1) Saltar simples
+                        if ($product->type === 'simple') {
+                            continue;
+                        }
+
+                        $productLang = $product->langs->first();
+                        if (!$productLang) {
+                            continue;
+                        }
+
+                        // 2) Filtrado de referencias válidas
+                        $validRefs = $product->references->filter(function ($reference) use ($product, $productLang) {
+                            $price    = (float) $reference->price;
+                            $minPrice = $product->category_id == 5 ? 20 : 40;
+
+                            $sinStock = ($productLang->pivot->stock ?? 0) <= 0;
+
+                            return $price > $minPrice
+                                && $reference->management->estado_gestion != 0
+                                && $reference->management->tags !== 'SEGUNDA MANO'
+                                && !($reference->management->estado_gestion == 2 && $sinStock);
+                        });
+
+                        if ($validRefs->isEmpty()) {
+                            continue;
+                        }
+
+                        // 3) Agrupar por precio normalizado
+                        $groups = $validRefs->groupBy(function ($r) {
+                            return number_format((float) $r->price, 2, '.', '');
+                        });
+
+                        // 4) Una fila por grupo
+                        foreach ($groups as $price => $refs) {
+
+                            $firstRef = $refs->first();
+
+                            $eanList = $refs->pluck('management.ean')->filter()->unique()->implode(',');
+                            $upcList = $refs->pluck('management.upc')->filter()->unique()->implode(',');
+
+                            $internalStatus = match ((string) $firstRef->management->estado_gestion) {
+                                '0' => 'Anulado',
+                                '1' => 'Activo',
+                                '2' => 'A extinguir',
+                                default => '',
+                            };
+
+                            fputcsv($out, [
+                                $firstRef->reference,                            // id
+                                $productLang->pivot->url ?? '',                  // url
+                                $productLang->pivot->title ?? '',                // name
+                                $price,                                          // price (ya normalizado)
+                                $productLang->pivot->img ?? '',                  // image
+                                '',                                              // shop
+                                optional($product->manufacturer)->title,         // brand
+                                $eanList,                                        // ean (concatenado)
+                                $eanList === '' ? $upcList : '',                 // upc (solo si no hubo ean)
+                                $firstRef->management->tags,                     // tag
+                                ($productLang->pivot->stock ?? 0) > 0 ? 'true' : 'false', // stock
+                                $internalStatus,                                 // internal_status
+                                $firstRef->management->codigo_proveedor,         // codigo_proveedor
+                                '',                                              // category
+                            ]);
+                        }
+                    }
+                });
+
+            fclose($out);
+
+        }, $filename, $headers);
+    }
+
 
     public function jobs()
     {

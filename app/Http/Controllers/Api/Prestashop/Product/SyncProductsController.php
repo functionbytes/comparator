@@ -43,10 +43,11 @@ class SyncProductsController extends Controller
     {
 
         return
-            PrestashopProduct::with(['langs', 'combinations'])
-                ->orderBy('id_product')
-                ->where('active', 1)
-                ->chunkById(200, function ($prestashopProducts) {
+            PrestashopProduct::with(['import', 'langs', 'combinations'])
+                    ->where('active', 1)
+                    ->whereHas('import')              // solo productos que tengan import relacionado
+                    ->orderBy('id_product')
+                    ->chunkById(200, function ($prestashopProducts) {
 
                     Log::info('Procesando lote de productos: ' . count($prestashopProducts));
 
@@ -87,14 +88,17 @@ class SyncProductsController extends Controller
                                 $manufacturer = null;
                             }
 
-                            $categoryId = $psProduct->defaultCategory
+                            $parentid = $psProduct->defaultCategory
                                             ? optional($psProduct->base_parent_category)->id_category
                                             : null;
+
+                            $categoryId = $psProduct->defaultCategory :: null;
 
                             $comparatorProduct = Product::updateOrCreate(
                                 ['prestashop_id' => $psProduct->id_product], // solo la clave única/lookup
                                 [
                                     'category_id'     => $categoryId,
+                                    'parentID'        => $parentid,
                                     'manufacturer_id' => $manufacturer,
                                     'available'       => 1,
                                     'type'            => $combinations->isNotEmpty() ? 'combination' : 'simple'
@@ -103,8 +107,7 @@ class SyncProductsController extends Controller
 
 
                             $type = $comparatorProduct->type;
-                            dump($psProduct->id_product);
-                            dump($psProduct->stock?->quantity);
+
                             foreach ($langs as $lang) {
 
                                 $psLang = $prestashopLangs->get($lang->id_lang);
@@ -127,7 +130,7 @@ class SyncProductsController extends Controller
                                 switch ($type) {
                                     case 'combination':
                                         foreach ($combinations as $combination) {
-                                            // dd($combination);
+
                                             $atributosString = $combination->atributosString($localLang->id);
 
                                             $finalPriceWithIVA = 0.0;
@@ -540,9 +543,7 @@ class SyncProductsController extends Controller
             ->chunk(100, function ($products) use (&$xml) {
 
                 foreach ($products as $product) {
-                    if($product->type == 'simple'){
-                        continue;
-                    }
+
 
                     $productLang = $product->langs->first();
                     if (!$productLang) {
@@ -647,8 +648,7 @@ class SyncProductsController extends Controller
 
     public function excel(string $langIso = 'es')
     {
-        $timestamp = Carbon::now(config('app.timezone'))->format('Ymd_His');
-        $filename  = "products_{$langIso}_{$timestamp}.csv";
+        $filename = "products_{$langIso}.csv";
 
         $headers = [
             'Content-Type'        => 'text/csv; charset=UTF-8',
@@ -660,28 +660,17 @@ class SyncProductsController extends Controller
 
             $out = fopen('php://output', 'w');
 
-            // BOM para UTF-8 (Excel)
+            // BOM para que Excel detecte UTF-8
             fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF));
 
-            // Encabezados (mismos campos que el XML)
+            // Encabezados
             fputcsv($out, [
-                'id',
-                'url',
-                'name',
-                'price',
-                'image',
-                'shop',
-                'brand',
-                'ean',
-                'upc',
-                'tag',
-                'stock',
-                'internal_status',
-                'codigo_proveedor',
-                'category',
+                'id','url','name','price','image','shop','brand','ean','upc',
+                'tag','stock','internal_status','codigo_proveedor','category'
             ]);
 
             $lang = \App\Models\Lang::iso($langIso);
+            $rowCount = 0;
 
             \App\Models\Product::where('available', 1)
                 ->whereHas('langs', fn ($q) => $q->where('lang_id', $lang->id))
@@ -690,51 +679,35 @@ class SyncProductsController extends Controller
                     'references'   => fn ($q) => $q->where('lang_id', $lang->id)->with('management'),
                     'manufacturer:id,title',
                 ])
-                ->chunk(100, function ($products) use ($out, $lang) {
+                ->chunk(1000, function ($products) use (&$rowCount, $out) {
 
                     foreach ($products as $product) {
-
-                        // 1) Saltar simples
-                        if ($product->type === 'simple') {
-                            continue;
-                        }
-
                         $productLang = $product->langs->first();
                         if (!$productLang) {
                             continue;
                         }
 
-                        // 2) Filtrado de referencias válidas
-                        $validRefs = $product->references->filter(function ($reference) use ($product, $productLang) {
+                        foreach ($product->references as $reference) {
                             $price    = (float) $reference->price;
                             $minPrice = $product->category_id == 5 ? 20 : 40;
-
+                            if ($price <= $minPrice) {
+                                continue;
+                            }
+                            if ($reference->management->estado_gestion == 0) {
+                                continue;
+                            }
+                            if($reference->management->tags == 'SEGUNDA MANO'){
+                                continue;
+                            }
                             $sinStock = ($productLang->pivot->stock ?? 0) <= 0;
+                            if ($reference->management->estado_gestion == 2 && $sinStock) {
+                                continue;
+                            }
 
-                            return $price > $minPrice
-                                && $reference->management->estado_gestion != 0
-                                && $reference->management->tags !== 'SEGUNDA MANO'
-                                && !($reference->management->estado_gestion == 2 && $sinStock);
-                        });
+                            $ean = $reference->management->ean;
+                            $upc = $reference->management->upc;
 
-                        if ($validRefs->isEmpty()) {
-                            continue;
-                        }
-
-                        // 3) Agrupar por precio normalizado
-                        $groups = $validRefs->groupBy(function ($r) {
-                            return number_format((float) $r->price, 2, '.', '');
-                        });
-
-                        // 4) Una fila por grupo
-                        foreach ($groups as $price => $refs) {
-
-                            $firstRef = $refs->first();
-
-                            $eanList = $refs->pluck('management.ean')->filter()->unique()->implode(',');
-                            $upcList = $refs->pluck('management.upc')->filter()->unique()->implode(',');
-
-                            $internalStatus = match ((string) $firstRef->management->estado_gestion) {
+                            $internalStatus = match ((string) $reference->management->estado_gestion) {
                                 '0' => 'Anulado',
                                 '1' => 'Activo',
                                 '2' => 'A extinguir',
@@ -742,21 +715,22 @@ class SyncProductsController extends Controller
                             };
 
                             fputcsv($out, [
-                                $firstRef->reference,                            // id
-                                $productLang->pivot->url ?? '',                  // url
-                                $productLang->pivot->title ?? '',                // name
-                                $price,                                          // price (ya normalizado)
-                                $productLang->pivot->img ?? '',                  // image
-                                '',                                              // shop
-                                optional($product->manufacturer)->title,         // brand
-                                $eanList,                                        // ean (concatenado)
-                                $eanList === '' ? $upcList : '',                 // upc (solo si no hubo ean)
-                                $firstRef->management->tags,                     // tag
-                                ($productLang->pivot->stock ?? 0) > 0 ? 'true' : 'false', // stock
-                                $internalStatus,                                 // internal_status
-                                $firstRef->management->codigo_proveedor,         // codigo_proveedor
-                                '',                                              // category
+                                $reference->reference,
+                                $productLang->pivot->url,
+                                $productLang->pivot->title,
+                                number_format($reference->price, 2, '.', ''),
+                                $productLang->pivot->img,
+                                '',
+                                optional($product->manufacturer)->title,
+                                $ean ?: '',
+                                $ean ? '' : $upc,
+                                $reference->management->tags,
+                                $productLang->pivot->stock > 0 ? 'true' : 'false',
+                                $internalStatus,
+                                $reference->management->codigo_proveedor,
+                                '',
                             ]);
+                            $rowCount++;
                         }
                     }
                 });

@@ -189,4 +189,9 @@ class Product extends Model
         return $this->hasMany('App\Models\Prestashop\Combination\Unique', 'id_product', 'id_product');
     }
 
+    public function import()
+    {
+        return $this->hasOne('App\Models\Prestashop\Product\ProductImport', 'id_product', 'id_product');
+    }
+
 }

@@ -9,9 +9,9 @@ use Illuminate\Support\Facades\Route;
 
 
 
-// Route::get('/', [SyncProductsController::class, 'sync']);
+Route::get('/', [SyncProductsController::class, 'sync']);
 // Route::get('/', [SyncProductsController::class, 'xml']);
-Route::get('/', [SyncProductsController::class, 'excel']);
+// Route::get('/', [SyncProductsController::class, 'excel']);
 // Route::get('/', [SyncProductsController::class, 'sync_copi']);
 
 

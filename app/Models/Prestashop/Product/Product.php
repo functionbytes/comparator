@@ -82,6 +82,15 @@ class Product extends Model
         );
     }
 
+   public function combinationStock()
+    {
+        return $this->hasMany(
+            'App\Models\Prestashop\Stock',
+            'id_product',
+            'id_product'
+        )->where('quantity', '>', 0);
+    }
+
     public function prices()
     {
         return $this->hasMany(
@@ -90,14 +99,14 @@ class Product extends Model
             'id_product'
         )->where('id_country', 0)
             ->where(function ($query) {
-            $query->where('from', '<=', now())
-                ->orWhereNull('from')
-                ->orWhere('from', '0000-00-00 00:00:00');
-        })->where(function ($query) {
-            $query->where('to', '>=', now())
-                ->orWhereNull('to')
-                ->orWhere('to', '0000-00-00 00:00:00');
-        });
+                $query->where('from', '<=', now())
+                    ->orWhereNull('from')
+                    ->orWhere('from', '0000-00-00 00:00:00');
+            })->where(function ($query) {
+                $query->where('to', '>=', now())
+                    ->orWhereNull('to')
+                    ->orWhere('to', '0000-00-00 00:00:00');
+            });
     }
 
     public function getNameAttribute()
@@ -115,7 +124,7 @@ class Product extends Model
         return $this->hasOne('App\Models\Prestashop\Product\ProductLang', 'id_product', 'id_product')->where('id_lang', $idLang);
     }
 
-    public function getFilterEan($ids ,$type)
+    public function getFilterEan($ids, $type)
     {
 
         //$groupedByPrice = $this->prices->groupBy('price');
@@ -128,12 +137,12 @@ class Product extends Model
             $ean = $item->values()->map(function ($value) {
                 return optional($value->productAttribute)->validationCombination();
             })->filter()
-            ->implode(',');
+                ->implode(',');
 
             $eanPorPrecio[$price] = $ean;
         }
 
-        dd($groupedByPrice , $eanPorPrecio,$this);
+        dd($groupedByPrice, $eanPorPrecio, $this);
 
         return $ean;
     }
@@ -146,7 +155,7 @@ class Product extends Model
 
         if ($image && $lang) {
             return "https://www.a-alvarez.com/{$image->id_image}-home_default/{$lang->link_rewrite}.jpg";
-        }else{
+        } else {
             return '';
         }
 
@@ -188,10 +197,42 @@ class Product extends Model
     {
         return $this->hasMany('App\Models\Prestashop\Combination\Unique', 'id_product', 'id_product');
     }
-
+    public function unique()
+    {
+        return $this->hasOne('App\Models\Prestashop\Combination\Unique', 'id_product', 'id_product');
+    }
     public function import()
     {
         return $this->hasOne('App\Models\Prestashop\Product\ProductImport', 'id_product', 'id_product');
     }
 
+    public function scopeType()
+    {
+        return count($this->combinations) > 0 ? 'combination' : 'simple';
+    }
+
+    public function validationStock()
+    {
+        switch ($this->type()) {
+            case 'combination':
+                return $this->hasOne(
+                    'App\Models\Prestashop\Stock',
+                    'id_product_attribute',
+                    'id_product_attribute'
+                )->first()?->quantity;
+
+                break;
+
+            case 'simple':
+                return $this->hasOne(
+                    'App\Models\Prestashop\Stock',
+                    'id_product',
+                    'id_product'
+                )->first()?->quantity;
+                break;
+
+            default:
+                break;
+        }
+    }
 }

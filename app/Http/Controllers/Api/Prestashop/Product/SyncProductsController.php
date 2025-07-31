@@ -5,17 +5,23 @@ namespace App\Http\Controllers\Api\Prestashop\Product;
 use Illuminate\Support\Facades\Storage;
 use App\Http\Controllers\Controller;
 use App\Jobs\Prestashop\SynchronizationProducts;
+use App\Jobs\SyncPrestashopProductsMaster;
 use App\Models\Lang;
 use App\Models\Manufacturer;
 use App\Models\Prestashop\Lang as PrestashopLang;
 use App\Models\Prestashop\Manufacturer as PrestashopManufacturer;
 use App\Models\Prestashop\Product\Product as PrestashopProduct;
-use App\Models\ProductReferenceManagement;
+use App\Models\Prestashop\Combination\All as PrestashopCombination;
+
+
+use App\Models\Prestashop\Stock as PrestashopStock;
+// use App\Models\ProductReferenceManagement;
 use App\Models\Prestashop\Combination\Import as PsCombImport;
 use App\Models\Prestashop\Combination\Unique as PsCombUnique;
 use App\Models\Product;
 use App\Models\ProductLang;
 use App\Models\ProductReference;
+use App\Models\ProductReferenceLang;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -42,425 +48,749 @@ class SyncProductsController extends Controller
     public function sync()
     {
 
+        $id_lang = PrestashopLang::active()->get()->keyBy('id_lang');
+        dd($id_lang->get(1));
+
         return
-            PrestashopProduct::with(['import', 'langs', 'combinations'])
-                    ->where('active', 1)
-                    ->whereHas('import')              // solo productos que tengan import relacionado
-                    ->orderBy('id_product')
-                    ->chunkById(200, function ($prestashopProducts) {
+            PrestashopCombination::management()->orderBy('id_product_attribute')
+            ->chunkById(1, function ($prestashopProducts) {
 
-                    Log::info('Procesando lote de productos: ' . count($prestashopProducts));
+                dd($prestashopProducts);
+                Log::info('Procesando lote de productos: ' . count($prestashopProducts));
 
-                    try {
+                try {
 
-                        $prestashopLangIds = [];
-                        foreach ($prestashopProducts as $product) {
-                            foreach ($product->langs as $lang) {
-                                $prestashopLangIds[] = $lang->id_lang;
-                            }
+
+                } catch (Throwable $e) {
+                    Log::error('Error during product sync chunk: ' . $e->getMessage(), [
+                        'trace' => $e->getTraceAsString()
+                    ]);
+                }
+
+
+
+
+
+
+                try {
+
+                    $prestashopLangIds = [];
+                    foreach ($prestashopProducts as $product) {
+                        foreach ($product->langs as $lang) {
+                            $prestashopLangIds[] = $lang->id_lang;
+                        }
+                    }
+
+                    $prestashopLangIds = array_unique($prestashopLangIds);
+                    $prestashopLangs = PrestashopLang::active()->byLangIds($prestashopLangIds)->get()->keyBy('id_lang');
+                    $localLangs = Lang::byIsoCodes($prestashopLangs->pluck('iso_code'))->get()->keyBy('iso_code');
+
+                    // -------- Prefetch etiquetas ----------
+                    // $allProductIds        = $prestashopProducts->pluck('id_product')->unique()->values();
+                    // $allCombinationIds    = $prestashopProducts->pluck('combinations.*.id_product_attribute')->flatten()->filter()->unique()->values()->toArray();
+
+                    // $uniqueMap  = PsCombUnique::available()->byProductIds($allProductIds->all())->get()->keyBy('id_product');
+                    //$importMap  = PsCombImport::available()->byProductIds($allCombinationIds)->get()->keyBy('id_product_attribute');
+                    // $importMap  = PsCombImport::available()->byProductIds($allCombinationIds)->get()->select('id_product_attribute');
+                    // dd($importMapp->take(10));
+                    // dump($importMap);
+
+
+                    foreach ($prestashopProducts as $psProduct) {
+                        // if($psProduct->id_product == 456){
+                        // dd($psProduct);
+
+                        Log::info('Procesando el productos: ' . $psProduct->id_product);
+
+                        $langs = $psProduct->langs;
+
+
+                        if ($psProduct->id_manufacturer != 0) {
+                            $psManufacturer = PrestashopManufacturer::id($psProduct->id_manufacturer);
+                            $comparatorManufacturer = Manufacturer::firstOrCreate(
+                                ['title' => $psManufacturer->name],
+                                ['available' => 1]
+                            );
+                            $manufacturer = $comparatorManufacturer->id;
+                        } else {
+                            $manufacturer = null;
                         }
 
-                        $prestashopLangIds = array_unique($prestashopLangIds);
-                        $prestashopLangs = PrestashopLang::active()->byLangIds($prestashopLangIds)->get()->keyBy('id_lang');
-                        $localLangs = Lang::byIsoCodes($prestashopLangs->pluck('iso_code'))->get()->keyBy('iso_code');
+                        $parentid = $psProduct->defaultCategory
+                            ? optional($psProduct->base_parent_category)->id_category
+                            : null;
 
-                        // -------- Prefetch etiquetas ----------
-                        $allProductIds        = $prestashopProducts->pluck('id_product')->unique()->values();
-                        $allCombinationIds    = $prestashopProducts->pluck('combinations.*.id_product_attribute')->flatten()->filter()->unique()->values()->toArray();
-
-                        $uniqueMap  = PsCombUnique::available()->byProductIds($allProductIds->all())->get()->keyBy('id_product');
-                        $importMap  = PsCombImport::available()->byProductIds($allCombinationIds)->get()->keyBy('id_product_attribute');
+                        $categoryId = $psProduct->defaultCategory ? $psProduct->defaultCategory->id : null;
 
 
-                        foreach ($prestashopProducts as $psProduct) {
+                        $comparatorProduct = Product::updateOrCreate(
+                            ['prestashop_id' => $psProduct->id_product], // solo la clave única/lookup
+                            [
+                                'category_id'     => $categoryId,
+                                'parentID'        => $parentid,
+                                'manufacturer_id' => $manufacturer,
+                                'available'       => 1,
+                                'type'            => $psProduct->type()
+                            ]
+                        );
 
-                            $combinations = $psProduct->combinations;
-                            $langs = $psProduct->langs;
+                        $type = $comparatorProduct->type;
+                        // dd($type);
 
-                            if($psProduct->id_manufacturer != 0){
-                                $psManufacturer = PrestashopManufacturer::id($psProduct->id_manufacturer);
-                                $comparatorManufacturer = Manufacturer::firstOrCreate(
-                                    ['title' => $psManufacturer->name],
-                                    ['available' => 1]
-                                );
-                                $manufacturer = $comparatorManufacturer->id;
-                            }else{
-                                $manufacturer = null;
-                            }
+                        switch ($type) {
+                            case 'combination':
 
-                            $parentid = $psProduct->defaultCategory
-                                            ? optional($psProduct->base_parent_category)->id_category
-                                            : null;
-
-                            $categoryId = $psProduct->defaultCategory :: null;
-
-                            $comparatorProduct = Product::updateOrCreate(
-                                ['prestashop_id' => $psProduct->id_product], // solo la clave única/lookup
-                                [
-                                    'category_id'     => $categoryId,
-                                    'parentID'        => $parentid,
-                                    'manufacturer_id' => $manufacturer,
-                                    'available'       => 1,
-                                    'type'            => $combinations->isNotEmpty() ? 'combination' : 'simple'
-                                ]
-                            );
+                                $combinations = $psProduct->combinationStock;
 
 
-                            $type = $comparatorProduct->type;
 
-                            foreach ($langs as $lang) {
+                                foreach ($combinations as $item) {
 
-                                $psLang = $prestashopLangs->get($lang->id_lang);
+                                    $combination = $item->attribute;
 
-                                $localLang = $localLangs->get($psLang->iso_code);
+                                    // Log::info('id_product_attribute: ' . $combination->id_product_attribute);
+                                    $importMap = $combination->import;
+                                    // dd($combination->import);
+                                    // $src = $importMap->get($combination->id_product_attribute);
+                                    // $etiqueta = optional($importMap->get($combination->id_product_attribute))->etiqueta;
 
-                                $langProduct = ProductLang::updateOrCreate(
-                                    [
-                                        'product_id' => $comparatorProduct->id,
-                                        'lang_id'    => $localLang->id,
-                                    ],
-                                    [
-                                        'title' => $lang->name,
-                                        'url'   => $lang->url,
-                                        'img'   => $psProduct->getImageUrl($localLang->id),
-                                    ]
-                                );
+                                    $pr = ProductReference::updateOrCreate(
+                                        [
+                                            'reference'  => $combination->reference,
+                                            'product_id' => $comparatorProduct->id,
+                                        ],
+                                        [
+                                            'combination_id'         => $combination->id_product_attribute  ?? null,
+                                            'attribute_id'           => $combination->id_product_attribute  ?? null,
+                                            'tags'                   => $importMap->etiqueta  ?? null,
+                                            'id_articulo'            => $importMap->id_articulo ?? null,
+                                            'unidades_oferta'        => $importMap->unidades_oferta ?? null,
+                                            'estado_gestion'         => $importMap->estado_gestion ?? null,
+                                            'es_segunda_mano'        => $importMap->es_segunda_mano ?? 0,
+                                            'externo_disponibilidad' => $importMap->externo_disponibilidad ?? 0,
+                                            'codigo_proveedor'       => $importMap->codigo_proveedor ?? null,
+                                            'precio_costo_proveedor' => $importMap->precio_costo_proveedor ?? null,
+                                            'tarifa_proveedor'       => $importMap->tarifa_proveedor ?? null,
+                                            'es_arma'                => $importMap->es_arma ?? 0,
+                                            'es_arma_fogueo'         => $importMap->es_arma_fogueo ?? 0,
+                                            'es_cartucho'            => $importMap->es_cartucho ?? 0,
+                                            'ean'                    => $importMap->ean ?? 0,
+                                            'upc'                    => $importMap->upc ?? 0,
+                                        ]
+                                    );
+                                    // dd($combination->validationStock());
 
+                                    // $quantity = PrestashopStock::byProduct($comparatorProduct->prestashop_id,$combination->id_product_attribute);
+                                    // Log::info('Antes Lang: ' . $langs);
+                                    foreach ($langs as $lang) {
+                                        // Log::info('Despues de Lang: ' . $lang);
+                                        $psLang = $prestashopLangs->get($lang->id_lang);
 
-                                switch ($type) {
-                                    case 'combination':
-                                        foreach ($combinations as $combination) {
+                                        $localLang = $localLangs->get($psLang->iso_code);
 
-                                            $atributosString = $combination->atributosString($localLang->id);
-
-                                            $finalPriceWithIVA = 0.0;
-                                            $prices = $combination->prices;
-                                            $specificPrice = $prices->firstWhere('from_quantity', 1);
-
-                                            if ($specificPrice) {
-                                                $finalPriceWithIVA = round(
-                                                    ((float) $specificPrice->price - (float) $specificPrice->reduction)
-                                                    * (1 + (float) $localLang->iva / 100),
-                                                    2
-                                                );
-                                            }
-
-                                            $pr = ProductReference::updateOrCreate(
-                                                [
-                                                    'reference'   => $combination->reference,
-                                                    'product_id'  => $comparatorProduct->id,
-                                                    'lang_id'     => $localLang->id,
-                                                ],
-                                                [
-                                                    'combination_id' => $combination->id_product_attribute,
-                                                    'available'      => $combination->stock?->quantity > 0,
-                                                    'attribute_id'   => $combination->id_product_attribute,
-                                                    'characteristics'=> $atributosString,
-                                                    'price'          => $finalPriceWithIVA,
-                                                    'url'            => null,
-                                                ]
-                                            );
-
-                                            // Tags solo para el lang configurado
-                                            if ($localLang->id == 1) {
-                                                $src = $importMap->get($combination->id_product_attribute);
-                                                $etiqueta = optional($importMap->get($combination->id_product_attribute))->etiqueta;
-                                                ProductReferenceManagement::updateOrCreate(
-                                                    ['product_reference_id' => $pr->id],
-                                                    [
-                                                        'tags'                   => $etiqueta,
-                                                        'id_articulo'            => $src->id_articulo ?? null,
-                                                        'unidades_oferta'        => $src->unidades_oferta ?? null,
-                                                        'estado_gestion'         => $src->estado_gestion ?? null,
-                                                        'es_segunda_mano'        => $src->es_segunda_mano ?? 0,
-                                                        'externo_disponibilidad' => $src->externo_disponibilidad ?? 0,
-                                                        'codigo_proveedor'       => $src->codigo_proveedor ?? null,
-                                                        'precio_costo_proveedor' => $src->precio_costo_proveedor ?? null,
-                                                        'tarifa_proveedor'       => $src->tarifa_proveedor ?? null,
-                                                        'es_arma'                => $src->es_arma ?? 0,
-                                                        'es_arma_fogueo'         => $src->es_arma_fogueo ?? 0,
-                                                        'es_cartucho'            => $src->es_cartucho ?? 0,
-                                                        'ean'                    => $src->ean ?? 0,
-                                                        'upc'                    => $src->upc ?? 0,
-                                                    ]
-                                                );
-                                            }
-
-                                            $langProduct->stock = $combination->stock?->quantity ?? 0;
-                                            $langProduct->available = $combination->stock?->quantity > 0;
-                                            $langProduct->save();
-
-                                        }
-
-                                        break;
-
-                                    case 'simple':
-
-                                        $finalPriceWithIVA = 0.0;
-                                        $specificPrice = $psProduct->prices->firstWhere('from_quantity', 1);
-
-                                        if ($specificPrice) {
-                                            $finalPriceWithIVA = round(
-                                                ((float) $specificPrice->price - (float) $specificPrice->reduction)
-                                                * (1 + (float) $localLang->iva / 100),
-                                                2
-                                            );
-                                        }
-
-                                        $pr = ProductReference::updateOrCreate(
+                                        $langProduct = ProductLang::updateOrCreate(
                                             [
-                                                'reference'  => $psProduct->reference,
                                                 'product_id' => $comparatorProduct->id,
                                                 'lang_id'    => $localLang->id,
                                             ],
                                             [
-                                                'combination_id' => null,
-                                                'available'      => $psProduct->stock?->quantity > 0,
-                                                'attribute_id'   => null,
-                                                'characteristics'=> null,
-                                                'price'          => $finalPriceWithIVA,
-                                                'url'            => null,
+                                                'title' => $lang->name,
+                                                'url'   => $lang->url,
+                                                'img'   => $psProduct->getImageUrl($localLang->id),
+                                                'stock' => $combination->validationStock(),
                                             ]
                                         );
 
-
-                                        if ($localLang->id == 1) {
-                                            $src = $uniqueMap->get($psProduct->id_product);
-                                            $etiqueta = optional($uniqueMap->get($psProduct->id_product))->etiqueta;
-                                            ProductReferenceManagement::updateOrCreate(
-                                                    ['product_reference_id' => $pr->id],
-                                                    [
-                                                        'tags'                   => $etiqueta,
-                                                        'id_articulo'            => $src->id_articulo ?? null,
-                                                        'unidades_oferta'        => $src->unidades_oferta ?? null,
-                                                        'estado_gestion'         => $src->estado_gestion ?? null,
-                                                        'es_segunda_mano'        => $src->es_segunda_mano ?? 0,
-                                                        'externo_disponibilidad' => $src->externo_disponibilidad ?? 0,
-                                                        'codigo_proveedor'       => $src->codigo_proveedor ?? null,
-                                                        'precio_costo_proveedor' => $src->precio_costo_proveedor ?? null,
-                                                        'tarifa_proveedor'       => $src->tarifa_proveedor ?? null,
-                                                        'es_arma'                => $src->es_arma ?? 0,
-                                                        'es_arma_fogueo'         => $src->es_arma_fogueo ?? 0,
-                                                        'es_cartucho'            => $src->es_cartucho ?? 0,
-                                                        'ean'                    => $src->ean ?? 0,
-                                                        'upc'                    => $src->upc ?? 0,
-                                                    ]
-                                                );
-                                        }
-
-                                        $comparatorProduct->stock = $psProduct->stock?->quantity ?? 0;
-                                        $langProduct->available = $psProduct->stock?->quantity > 0;
-                                        $langProduct->save();
-
-                                        break;
-
-                                    default:
-                                        Log::warning("Tipo de producto desconocido para ID {$psProduct->id_product}");
-                                        break;
-                                }
-                            }
-                        }
-
-
-                    } catch (Throwable $e) {
-                        Log::error('Error during product sync chunk: ' . $e->getMessage(), [
-                            'trace' => $e->getTraceAsString()
-                        ]);
-                    }
-                });
-
-    }
-
-    public function sync_copi()
-    {
-
-        return PrestashopProduct::with(['langs'])
-                ->orderBy('id_product')
-                ->where('active', 1)
-                ->chunkById(1, function ($prestashopProducts) {
-
-                    // 1) Log original
-                    Log::info('Procesando lote de productos (antes de filtrar): ' . count($prestashopProducts));
-
-                    // 2) Filtramos según la categoría y el precio (sin IVA)
-                    $prestashopProducts = $prestashopProducts->filter(function ($psProduct) {
-
-
-                        // Obtenemos el precio base (from_quantity = 1), según si tiene combinaciones o es simple
-                        if ($psProduct->combinations->isNotEmpty()) {
-                            // Para productos con combinaciones, tomamos el primer precio de la primera combinación
-                            $firstCombination = $psProduct->combinations->first();
-                            $specificPrice   = $firstCombination->prices->firstWhere('from_quantity', 1);
-
-                        } else {
-                            // Para productos simples, precio directo
-                            $specificPrice = $psProduct->prices->firstWhere('from_quantity', 1);
-                        }
-
-
-                        // Si no hay precio definido, descartamos
-                        if (! $specificPrice) {
-                            return false;
-                        }
-
-                        // Calculamos precio neto (sin IVA) o con IVA si lo prefieres aquí
-                        $netPrice = (float) $specificPrice->price - (float) $specificPrice->reduction;
-
-                        // Sacamos la categoría principal (la que usas luego en el 'category_id' del comparador)
-                        $categoryId = optional($psProduct->defaultCategory)->id_category;
-
-                        // Umbral: si categoría 5 => >20€, resto => >40€
-                        $threshold = ($categoryId === 5) ? 20 : 40;
-
-                        return $netPrice > $threshold;
-                    });
-
-                    // 3) Log tras el filtrado
-                    Log::info('Procesando lote de productos (tras filtrar): ' . count($prestashopProducts));
-
-
-                    try {
-
-                        $prestashopLangIds = [];
-                        foreach ($prestashopProducts as $product) {
-                            foreach ($product->langs as $lang) {
-                                $prestashopLangIds[] = $lang->id_lang;
-                            }
-                        }
-
-                        $prestashopLangIds = array_unique($prestashopLangIds);
-                        $prestashopLangs = PrestashopLang::active()->byLangIds($prestashopLangIds)->get()->keyBy('id_lang');
-                        $localLangs = Lang::byIsoCodes($prestashopLangs->pluck('iso_code'))->get()->keyBy('iso_code');
-
-                        foreach ($prestashopProducts as $psProduct) {
-
-                            $combinations = $psProduct->combinations;
-                            $langs = $psProduct->langs;
-
-                            if($psProduct->id_manufacturer != 0){
-                                $psManufacturer = PrestashopManufacturer::id($psProduct->id_manufacturer);
-                                $comparatorManufacturer = Manufacturer::firstOrCreate(
-                                    ['title' => $psManufacturer->name],
-                                    ['available' => 1]
-                                );
-                                $manufacturer = $comparatorManufacturer->id;
-                            }else{
-                                $manufacturer = null;
-                            }
-
-                            $comparatorProduct = Product::firstOrCreate([
-                                'prestashop_id' => $psProduct->id_product,
-                                'category_id' => $psProduct->defaultCategory!=null ? $psProduct->base_parent_category->id_category : null,
-                                'manufacturer_id' => $manufacturer,
-                                'available' => 1,
-                                'type' => count($combinations)>0 ? 'combination' : 'simple'
-                            ]);
-
-                            $type = $comparatorProduct->type;
-
-                            foreach ($langs as $lang) {
-
-                                $psLang = $prestashopLangs->get($lang->id_lang);
-                                $localLang = $localLangs->get($psLang->iso_code);
-
-                                $langProduct = ProductLang::firstOrCreate([
-                                    'product_id' => $comparatorProduct->id,
-                                    'lang_id' => $localLang->id,
-                                    'title' => $lang->name,
-                                    'url' => $lang->url,
-                                    'img' => $psProduct->getImageUrl($localLang->id),
-                                    'price' =>  0.0,
-                                ]);
-
-
-                                switch ($type) {
-                                    case 'combination':
-                                        foreach ($combinations as $combination) {
-
-                                            $finalPriceWithIVA = 0.0;
-                                            $prices = $combination->prices;
-                                            $specificPrice = $prices->first();
-
-                                            if (isset($specificPrice)) {
-                                                // dd($specificPrice->price);
-                                                $finalPriceWithIVA = round(
-                                                    ((float) $specificPrice->price - (float) $specificPrice->reduction)
-                                                    * (1 + (float) $localLang->iva / 100),
-                                                    2
-                                                );
-                                            }
-
-                                            ProductReference::updateOrCreate([
-                                                'reference' => $combination->reference,
-                                                'combination_id' => $combination->id_product,
-                                                'product_id' => $comparatorProduct->id,
-                                                'lang_id' => $localLang->id,
-                                                'available' => $combination->stock?->quantity > 0,
-                                                'attribute_id' => $combination->id_product_attribute,
-                                                'url' => null,
-                                            ], []);
-
-                                            // if($finalPriceWithIVA == '0.0'){
-                                            //     dd($psProduct->id_product,$finalPriceWithIVA,$specificPrice,$combination);
-                                            // }
-
-                                            $comparatorProduct->stock = $psProduct->stock?->quantity ?? 0;
-                                            $langProduct->price = $finalPriceWithIVA;
-                                            $langProduct->available = $psProduct->stock?->quantity > 0;
-                                            $langProduct->save();
-
-                                        }
-
-                                        break;
-
-                                    case 'simple':
-
                                         $finalPriceWithIVA = 0.0;
-                                        $specificPrice = $psProduct->prices->first();
+                                        $prices = $combination->prices;
+                                        // Log::info('count(prices): ' . count($prices));
+                                        // dump(count($prices));
+                                        $specificPrice = $prices->firstWhere('from_quantity', 1);
 
-                                        if (isset($specificPrice)) {
+                                        if ($specificPrice) {
                                             $finalPriceWithIVA = round(
                                                 ((float) $specificPrice->price - (float) $specificPrice->reduction)
-                                                * (1 + (float) $localLang->iva / 100),
+                                                    * (1 + (float) $localLang->iva / 100),
                                                 2
                                             );
                                         }
 
-                                        ProductReference::updateOrCreate([
-                                            'reference' => $psProduct->reference,
-                                            'combination_id' => null,
-                                            'product_id' => $comparatorProduct->id,
-                                            'lang_id' => $localLang->id,
-                                            'available' => $psProduct->stock?->quantity > 0,
-                                            'attribute_id' => null,
-                                            'url' => null,
-                                        ], []);
-
-                                        $comparatorProduct->stock = $psProduct->stock?->quantity ?? 0;
-                                        $langProduct->price = $finalPriceWithIVA;
-                                        $langProduct->available = $psProduct->stock?->quantity > 0;
-                                        $langProduct->save();
-
-                                        break;
-
-                                    default:
-                                        Log::warning("Tipo de producto desconocido para ID {$psProduct->id_product}");
-                                        break;
+                                        ProductReferenceLang::updateOrCreate(
+                                            [
+                                                'reference_id' => $pr->id,
+                                                'lang_id'    => $localLang->id,
+                                            ],
+                                            [
+                                                'url'   => $lang->url,
+                                                'characteristics' => $combination->atributosString($localLang->id),
+                                                'price' => $finalPriceWithIVA,
+                                                'reduction' => isset($specificPrice) ? $specificPrice->reduction : 0,
+                                                'available' => self::isBlocked($comparatorProduct->id, $localLang->id),
+                                                'img'   => $psProduct->getImageUrl($localLang->id),
+                                            ]
+                                        );
+                                    }
                                 }
-                            }
+
+
+
+                                // $combinations = $psProduct->combinations;
+
+                                // // dd($combinations->first()->import);
+                                // // dump($combinations);
+                                // // foreach ($combinations as $combination) {
+                                // $combinations->chunk(100)->each(function ($itemcombinacion) use ($comparatorProduct, $langs, $prestashopLangs, $localLangs, $psProduct) {
+                                //     //  dump($comparatorProduct,$langs,$prestashopLangs, $localLangs, $psProduct);
+                                //     foreach ($itemcombinacion as $combination) {
+                                //         // Log::info('id_product_attribute: ' . $combination->id_product_attribute);
+                                //         $importMap = $combination->import;
+                                //         // dd($combination->import);
+                                //         // $src = $importMap->get($combination->id_product_attribute);
+                                //         // $etiqueta = optional($importMap->get($combination->id_product_attribute))->etiqueta;
+
+                                //         $pr = ProductReference::updateOrCreate(
+                                //             [
+                                //                 'reference'  => $combination->reference,
+                                //                 'product_id' => $comparatorProduct->id,
+                                //             ],
+                                //             [
+                                //                 'combination_id'         => $combination->id_product_attribute  ?? null,
+                                //                 'attribute_id'           => $combination->id_product_attribute  ?? null,
+                                //                 'tags'                   => $importMap->etiqueta  ?? null,
+                                //                 'id_articulo'            => $importMap->id_articulo ?? null,
+                                //                 'unidades_oferta'        => $importMap->unidades_oferta ?? null,
+                                //                 'estado_gestion'         => $importMap->estado_gestion ?? null,
+                                //                 'es_segunda_mano'        => $importMap->es_segunda_mano ?? 0,
+                                //                 'externo_disponibilidad' => $importMap->externo_disponibilidad ?? 0,
+                                //                 'codigo_proveedor'       => $importMap->codigo_proveedor ?? null,
+                                //                 'precio_costo_proveedor' => $importMap->precio_costo_proveedor ?? null,
+                                //                 'tarifa_proveedor'       => $importMap->tarifa_proveedor ?? null,
+                                //                 'es_arma'                => $importMap->es_arma ?? 0,
+                                //                 'es_arma_fogueo'         => $importMap->es_arma_fogueo ?? 0,
+                                //                 'es_cartucho'            => $importMap->es_cartucho ?? 0,
+                                //                 'ean'                    => $importMap->ean ?? 0,
+                                //                 'upc'                    => $importMap->upc ?? 0,
+                                //             ]
+                                //         );
+                                //         // dd($combination->validationStock());
+
+                                //         // $quantity = PrestashopStock::byProduct($comparatorProduct->prestashop_id,$combination->id_product_attribute);
+                                //         Log::info('Antes Lang: ' . $langs);
+                                //         foreach ($langs as $lang) {
+                                //             Log::info('Despues de Lang: ' . $lang);
+                                //             $psLang = $prestashopLangs->get($lang->id_lang);
+
+                                //             $localLang = $localLangs->get($psLang->iso_code);
+
+                                //             $langProduct = ProductLang::updateOrCreate(
+                                //                 [
+                                //                     'product_id' => $comparatorProduct->id,
+                                //                     'lang_id'    => $localLang->id,
+                                //                 ],
+                                //                 [
+                                //                     'title' => $lang->name,
+                                //                     'url'   => $lang->url,
+                                //                     'img'   => $psProduct->getImageUrl($localLang->id),
+                                //                     'stock' => $combination->validationStock(),
+                                //                 ]
+                                //             );
+
+                                //             $finalPriceWithIVA = 0.0;
+                                //             $prices = $combination->prices;
+                                //             Log::info('count(prices): ' . count($prices));
+                                //             // dump(count($prices));
+                                //             $specificPrice = $prices->firstWhere('from_quantity', 1);
+
+                                //             if ($specificPrice) {
+                                //                 $finalPriceWithIVA = round(
+                                //                     ((float) $specificPrice->price - (float) $specificPrice->reduction)
+                                //                         * (1 + (float) $localLang->iva / 100),
+                                //                     2
+                                //                 );
+                                //             }
+
+                                //             ProductReferenceLang::updateOrCreate(
+                                //                 [
+                                //                     'reference_id' => $pr->id,
+                                //                     'lang_id'    => $localLang->id,
+                                //                 ],
+                                //                 [
+                                //                     'url'   => $lang->url,
+                                //                     'characteristics' => $combination->atributosString($localLang->id),
+                                //                     'price' => $finalPriceWithIVA,
+                                //                     'reduction' => isset($specificPrice) ? $specificPrice->reduction : 0,
+                                //                     'available' => self::isBlocked($comparatorProduct->id, $localLang->id),
+                                //                     'img'   => $psProduct->getImageUrl($localLang->id),
+                                //                 ]
+                                //             );
+                                //         }
+                                //     }
+                                // });
+
+                                break;
+
+                            case 'simple':
+
+                                $src = $psProduct->unique;
+                                // $src = $uniqueMap->get($psProduct->id_product);
+                                // $etiqueta = optional($uniqueMap->get($psProduct->id_product))->etiqueta;
+
+                                $pr = ProductReference::updateOrCreate(
+                                    [
+                                        'reference'  => $psProduct->reference,
+                                        'product_id' => $comparatorProduct->id,
+                                    ],
+                                    [
+                                        'combination_id' => NULL,
+                                        'attribute_id'   => NULL,
+                                        'tags'                   => $src->etiqueta,
+                                        'id_articulo'            => $src->id_articulo ?? null,
+                                        'unidades_oferta'        => $src->unidades_oferta ?? null,
+                                        'estado_gestion'         => $src->estado_gestion ?? null,
+                                        'es_segunda_mano'        => $src->es_segunda_mano ?? 0,
+                                        'externo_disponibilidad' => $src->externo_disponibilidad ?? 0,
+                                        'codigo_proveedor'       => $src->codigo_proveedor ?? null,
+                                        'precio_costo_proveedor' => $src->precio_costo_proveedor ?? null,
+                                        'tarifa_proveedor'       => $src->tarifa_proveedor ?? null,
+                                        'es_arma'                => $src->es_arma ?? 0,
+                                        'es_arma_fogueo'         => $src->es_arma_fogueo ?? 0,
+                                        'es_cartucho'            => $src->es_cartucho ?? 0,
+                                        'ean'                    => $src->ean ?? 0,
+                                        'upc'                    => $src->upc ?? 0,
+                                    ]
+                                );
+
+                                // $quantity = PrestashopStock::byProduct($comparatorProduct->prestashop_id,0);
+                                // dd($psProduct->validationStock());
+                                foreach ($langs as $lang) {
+
+                                    $psLang = $prestashopLangs->get($lang->id_lang);
+
+                                    $localLang = $localLangs->get($psLang->iso_code);
+
+                                    $langProduct = ProductLang::updateOrCreate(
+                                        [
+                                            'product_id' => $comparatorProduct->id,
+                                            'lang_id'    => $localLang->id,
+                                        ],
+                                        [
+                                            'title' => $lang->name,
+                                            'url'   => $lang->url,
+                                            'img'   => $psProduct->getImageUrl($localLang->id),
+                                            'stock' => $psProduct->validationStock(),
+                                        ]
+                                    );
+
+                                    $finalPriceWithIVA = 0.0;
+                                    $specificPrice = $psProduct->prices->firstWhere('from_quantity', 1);
+
+                                    if ($specificPrice) {
+                                        $finalPriceWithIVA = round(
+                                            ((float) $specificPrice->price - (float) $specificPrice->reduction)
+                                                * (1 + (float) $localLang->iva / 100),
+                                            2
+                                        );
+                                    }
+
+                                    ProductReferenceLang::updateOrCreate(
+                                        [
+                                            'reference_id' => $pr->id,
+                                            'lang_id'    => $localLang->id,
+                                        ],
+                                        [
+                                            'url'   => $lang->url,
+                                            'characteristics' => NULL,
+                                            'price' => $finalPriceWithIVA,
+                                            'reduction' => isset($specificPrice) ? $specificPrice->reduction : 0,
+                                            'available' => self::isBlocked($comparatorProduct->id, $localLang->id),
+                                            'img'   => $psProduct->getImageUrl($localLang->id),
+                                        ]
+                                    );
+                                }
+                                break;
+
+                            default:
+                                Log::warning("Tipo de producto desconocido para ID {$psProduct->id_product}");
+                                break;
                         }
 
-
-                    } catch (Throwable $e) {
-                        Log::error('Error during product sync chunk: ' . $e->getMessage(), [
-                            'trace' => $e->getTraceAsString()
-                        ]);
+                        // }
                     }
-                });
-
+                } catch (Throwable $e) {
+                    Log::error('Error during product sync chunk: ' . $e->getMessage(), [
+                        'trace' => $e->getTraceAsString()
+                    ]);
+                }
+            });
     }
 
-    function xmlItemProducto($producto, $portes_referencia,$resultado_arrays_correctos, $aOptionsByType, $idLangPs) {
+
+    public function syncs()
+    {
+        return
+            PrestashopProduct::where('active', 1)
+            ->whereHas('import')
+            ->orderBy('id_product')
+            ->chunkById(200, function ($prestashopProducts) {
+
+                Log::info('Procesando lote de productos: ' . count($prestashopProducts));
+
+                try {
+
+                    $prestashopLangIds = [];
+                    foreach ($prestashopProducts as $product) {
+                        foreach ($product->langs as $lang) {
+                            $prestashopLangIds[] = $lang->id_lang;
+                        }
+                    }
+
+                    $prestashopLangIds = array_unique($prestashopLangIds);
+                    $prestashopLangs = PrestashopLang::active()->byLangIds($prestashopLangIds)->get()->keyBy('id_lang');
+                    $localLangs = Lang::byIsoCodes($prestashopLangs->pluck('iso_code'))->get()->keyBy('iso_code');
+
+                    // -------- Prefetch etiquetas ----------
+                    // $allProductIds        = $prestashopProducts->pluck('id_product')->unique()->values();
+                    // $allCombinationIds    = $prestashopProducts->pluck('combinations.*.id_product_attribute')->flatten()->filter()->unique()->values()->toArray();
+
+                    // $uniqueMap  = PsCombUnique::available()->byProductIds($allProductIds->all())->get()->keyBy('id_product');
+                    //$importMap  = PsCombImport::available()->byProductIds($allCombinationIds)->get()->keyBy('id_product_attribute');
+                    // $importMap  = PsCombImport::available()->byProductIds($allCombinationIds)->get()->select('id_product_attribute');
+                    // dd($importMapp->take(10));
+                    // dump($importMap);
+
+
+                    foreach ($prestashopProducts as $psProduct) {
+                        // if($psProduct->id_product == 456){
+                        // dd($psProduct);
+
+                        Log::info('Procesando el productos: ' . $psProduct->id_product);
+
+                        $langs = $psProduct->langs;
+
+
+                        if ($psProduct->id_manufacturer != 0) {
+                            $psManufacturer = PrestashopManufacturer::id($psProduct->id_manufacturer);
+                            $comparatorManufacturer = Manufacturer::firstOrCreate(
+                                ['title' => $psManufacturer->name],
+                                ['available' => 1]
+                            );
+                            $manufacturer = $comparatorManufacturer->id;
+                        } else {
+                            $manufacturer = null;
+                        }
+
+                        $parentid = $psProduct->defaultCategory
+                            ? optional($psProduct->base_parent_category)->id_category
+                            : null;
+
+                        $categoryId = $psProduct->defaultCategory ? $psProduct->defaultCategory->id : null;
+
+
+                        $comparatorProduct = Product::updateOrCreate(
+                            ['prestashop_id' => $psProduct->id_product], // solo la clave única/lookup
+                            [
+                                'category_id'     => $categoryId,
+                                'parentID'        => $parentid,
+                                'manufacturer_id' => $manufacturer,
+                                'available'       => 1,
+                                'type'            => $psProduct->type()
+                            ]
+                        );
+
+                        $type = $comparatorProduct->type;
+                        // dd($type);
+
+                        switch ($type) {
+                            case 'combination':
+
+                                $combinations = $psProduct->combinationStock;
+
+
+
+                                foreach ($combinations as $item) {
+
+                                    $combination = $item->attribute;
+
+                                    // Log::info('id_product_attribute: ' . $combination->id_product_attribute);
+                                    $importMap = $combination->import;
+                                    // dd($combination->import);
+                                    // $src = $importMap->get($combination->id_product_attribute);
+                                    // $etiqueta = optional($importMap->get($combination->id_product_attribute))->etiqueta;
+
+                                    $pr = ProductReference::updateOrCreate(
+                                        [
+                                            'reference'  => $combination->reference,
+                                            'product_id' => $comparatorProduct->id,
+                                        ],
+                                        [
+                                            'combination_id'         => $combination->id_product_attribute  ?? null,
+                                            'attribute_id'           => $combination->id_product_attribute  ?? null,
+                                            'tags'                   => $importMap->etiqueta  ?? null,
+                                            'id_articulo'            => $importMap->id_articulo ?? null,
+                                            'unidades_oferta'        => $importMap->unidades_oferta ?? null,
+                                            'estado_gestion'         => $importMap->estado_gestion ?? null,
+                                            'es_segunda_mano'        => $importMap->es_segunda_mano ?? 0,
+                                            'externo_disponibilidad' => $importMap->externo_disponibilidad ?? 0,
+                                            'codigo_proveedor'       => $importMap->codigo_proveedor ?? null,
+                                            'precio_costo_proveedor' => $importMap->precio_costo_proveedor ?? null,
+                                            'tarifa_proveedor'       => $importMap->tarifa_proveedor ?? null,
+                                            'es_arma'                => $importMap->es_arma ?? 0,
+                                            'es_arma_fogueo'         => $importMap->es_arma_fogueo ?? 0,
+                                            'es_cartucho'            => $importMap->es_cartucho ?? 0,
+                                            'ean'                    => $importMap->ean ?? 0,
+                                            'upc'                    => $importMap->upc ?? 0,
+                                        ]
+                                    );
+                                    // dd($combination->validationStock());
+
+                                    // $quantity = PrestashopStock::byProduct($comparatorProduct->prestashop_id,$combination->id_product_attribute);
+                                    // Log::info('Antes Lang: ' . $langs);
+                                    foreach ($langs as $lang) {
+                                        // Log::info('Despues de Lang: ' . $lang);
+                                        $psLang = $prestashopLangs->get($lang->id_lang);
+
+                                        $localLang = $localLangs->get($psLang->iso_code);
+
+                                        $langProduct = ProductLang::updateOrCreate(
+                                            [
+                                                'product_id' => $comparatorProduct->id,
+                                                'lang_id'    => $localLang->id,
+                                            ],
+                                            [
+                                                'title' => $lang->name,
+                                                'url'   => $lang->url,
+                                                'img'   => $psProduct->getImageUrl($localLang->id),
+                                                'stock' => $combination->validationStock(),
+                                            ]
+                                        );
+
+                                        $finalPriceWithIVA = 0.0;
+                                        $prices = $combination->prices;
+                                        // Log::info('count(prices): ' . count($prices));
+                                        // dump(count($prices));
+                                        $specificPrice = $prices->firstWhere('from_quantity', 1);
+
+                                        if ($specificPrice) {
+                                            $finalPriceWithIVA = round(
+                                                ((float) $specificPrice->price - (float) $specificPrice->reduction)
+                                                    * (1 + (float) $localLang->iva / 100),
+                                                2
+                                            );
+                                        }
+
+                                        ProductReferenceLang::updateOrCreate(
+                                            [
+                                                'reference_id' => $pr->id,
+                                                'lang_id'    => $localLang->id,
+                                            ],
+                                            [
+                                                'url'   => $lang->url,
+                                                'characteristics' => $combination->atributosString($localLang->id),
+                                                'price' => $finalPriceWithIVA,
+                                                'reduction' => isset($specificPrice) ? $specificPrice->reduction : 0,
+                                                'available' => self::isBlocked($comparatorProduct->id, $localLang->id),
+                                                'img'   => $psProduct->getImageUrl($localLang->id),
+                                            ]
+                                        );
+                                    }
+                                }
+
+
+
+                                // $combinations = $psProduct->combinations;
+
+                                // // dd($combinations->first()->import);
+                                // // dump($combinations);
+                                // // foreach ($combinations as $combination) {
+                                // $combinations->chunk(100)->each(function ($itemcombinacion) use ($comparatorProduct, $langs, $prestashopLangs, $localLangs, $psProduct) {
+                                //     //  dump($comparatorProduct,$langs,$prestashopLangs, $localLangs, $psProduct);
+                                //     foreach ($itemcombinacion as $combination) {
+                                //         // Log::info('id_product_attribute: ' . $combination->id_product_attribute);
+                                //         $importMap = $combination->import;
+                                //         // dd($combination->import);
+                                //         // $src = $importMap->get($combination->id_product_attribute);
+                                //         // $etiqueta = optional($importMap->get($combination->id_product_attribute))->etiqueta;
+
+                                //         $pr = ProductReference::updateOrCreate(
+                                //             [
+                                //                 'reference'  => $combination->reference,
+                                //                 'product_id' => $comparatorProduct->id,
+                                //             ],
+                                //             [
+                                //                 'combination_id'         => $combination->id_product_attribute  ?? null,
+                                //                 'attribute_id'           => $combination->id_product_attribute  ?? null,
+                                //                 'tags'                   => $importMap->etiqueta  ?? null,
+                                //                 'id_articulo'            => $importMap->id_articulo ?? null,
+                                //                 'unidades_oferta'        => $importMap->unidades_oferta ?? null,
+                                //                 'estado_gestion'         => $importMap->estado_gestion ?? null,
+                                //                 'es_segunda_mano'        => $importMap->es_segunda_mano ?? 0,
+                                //                 'externo_disponibilidad' => $importMap->externo_disponibilidad ?? 0,
+                                //                 'codigo_proveedor'       => $importMap->codigo_proveedor ?? null,
+                                //                 'precio_costo_proveedor' => $importMap->precio_costo_proveedor ?? null,
+                                //                 'tarifa_proveedor'       => $importMap->tarifa_proveedor ?? null,
+                                //                 'es_arma'                => $importMap->es_arma ?? 0,
+                                //                 'es_arma_fogueo'         => $importMap->es_arma_fogueo ?? 0,
+                                //                 'es_cartucho'            => $importMap->es_cartucho ?? 0,
+                                //                 'ean'                    => $importMap->ean ?? 0,
+                                //                 'upc'                    => $importMap->upc ?? 0,
+                                //             ]
+                                //         );
+                                //         // dd($combination->validationStock());
+
+                                //         // $quantity = PrestashopStock::byProduct($comparatorProduct->prestashop_id,$combination->id_product_attribute);
+                                //         Log::info('Antes Lang: ' . $langs);
+                                //         foreach ($langs as $lang) {
+                                //             Log::info('Despues de Lang: ' . $lang);
+                                //             $psLang = $prestashopLangs->get($lang->id_lang);
+
+                                //             $localLang = $localLangs->get($psLang->iso_code);
+
+                                //             $langProduct = ProductLang::updateOrCreate(
+                                //                 [
+                                //                     'product_id' => $comparatorProduct->id,
+                                //                     'lang_id'    => $localLang->id,
+                                //                 ],
+                                //                 [
+                                //                     'title' => $lang->name,
+                                //                     'url'   => $lang->url,
+                                //                     'img'   => $psProduct->getImageUrl($localLang->id),
+                                //                     'stock' => $combination->validationStock(),
+                                //                 ]
+                                //             );
+
+                                //             $finalPriceWithIVA = 0.0;
+                                //             $prices = $combination->prices;
+                                //             Log::info('count(prices): ' . count($prices));
+                                //             // dump(count($prices));
+                                //             $specificPrice = $prices->firstWhere('from_quantity', 1);
+
+                                //             if ($specificPrice) {
+                                //                 $finalPriceWithIVA = round(
+                                //                     ((float) $specificPrice->price - (float) $specificPrice->reduction)
+                                //                         * (1 + (float) $localLang->iva / 100),
+                                //                     2
+                                //                 );
+                                //             }
+
+                                //             ProductReferenceLang::updateOrCreate(
+                                //                 [
+                                //                     'reference_id' => $pr->id,
+                                //                     'lang_id'    => $localLang->id,
+                                //                 ],
+                                //                 [
+                                //                     'url'   => $lang->url,
+                                //                     'characteristics' => $combination->atributosString($localLang->id),
+                                //                     'price' => $finalPriceWithIVA,
+                                //                     'reduction' => isset($specificPrice) ? $specificPrice->reduction : 0,
+                                //                     'available' => self::isBlocked($comparatorProduct->id, $localLang->id),
+                                //                     'img'   => $psProduct->getImageUrl($localLang->id),
+                                //                 ]
+                                //             );
+                                //         }
+                                //     }
+                                // });
+
+                                break;
+
+                            case 'simple':
+
+                                $src = $psProduct->unique;
+                                // $src = $uniqueMap->get($psProduct->id_product);
+                                // $etiqueta = optional($uniqueMap->get($psProduct->id_product))->etiqueta;
+
+                                $pr = ProductReference::updateOrCreate(
+                                    [
+                                        'reference'  => $psProduct->reference,
+                                        'product_id' => $comparatorProduct->id,
+                                    ],
+                                    [
+                                        'combination_id' => NULL,
+                                        'attribute_id'   => NULL,
+                                        'tags'                   => $src->etiqueta,
+                                        'id_articulo'            => $src->id_articulo ?? null,
+                                        'unidades_oferta'        => $src->unidades_oferta ?? null,
+                                        'estado_gestion'         => $src->estado_gestion ?? null,
+                                        'es_segunda_mano'        => $src->es_segunda_mano ?? 0,
+                                        'externo_disponibilidad' => $src->externo_disponibilidad ?? 0,
+                                        'codigo_proveedor'       => $src->codigo_proveedor ?? null,
+                                        'precio_costo_proveedor' => $src->precio_costo_proveedor ?? null,
+                                        'tarifa_proveedor'       => $src->tarifa_proveedor ?? null,
+                                        'es_arma'                => $src->es_arma ?? 0,
+                                        'es_arma_fogueo'         => $src->es_arma_fogueo ?? 0,
+                                        'es_cartucho'            => $src->es_cartucho ?? 0,
+                                        'ean'                    => $src->ean ?? 0,
+                                        'upc'                    => $src->upc ?? 0,
+                                    ]
+                                );
+
+                                // $quantity = PrestashopStock::byProduct($comparatorProduct->prestashop_id,0);
+                                // dd($psProduct->validationStock());
+                                foreach ($langs as $lang) {
+
+                                    $psLang = $prestashopLangs->get($lang->id_lang);
+
+                                    $localLang = $localLangs->get($psLang->iso_code);
+
+                                    $langProduct = ProductLang::updateOrCreate(
+                                        [
+                                            'product_id' => $comparatorProduct->id,
+                                            'lang_id'    => $localLang->id,
+                                        ],
+                                        [
+                                            'title' => $lang->name,
+                                            'url'   => $lang->url,
+                                            'img'   => $psProduct->getImageUrl($localLang->id),
+                                            'stock' => $psProduct->validationStock(),
+                                        ]
+                                    );
+
+                                    $finalPriceWithIVA = 0.0;
+                                    $specificPrice = $psProduct->prices->firstWhere('from_quantity', 1);
+
+                                    if ($specificPrice) {
+                                        $finalPriceWithIVA = round(
+                                            ((float) $specificPrice->price - (float) $specificPrice->reduction)
+                                                * (1 + (float) $localLang->iva / 100),
+                                            2
+                                        );
+                                    }
+
+                                    ProductReferenceLang::updateOrCreate(
+                                        [
+                                            'reference_id' => $pr->id,
+                                            'lang_id'    => $localLang->id,
+                                        ],
+                                        [
+                                            'url'   => $lang->url,
+                                            'characteristics' => NULL,
+                                            'price' => $finalPriceWithIVA,
+                                            'reduction' => isset($specificPrice) ? $specificPrice->reduction : 0,
+                                            'available' => self::isBlocked($comparatorProduct->id, $localLang->id),
+                                            'img'   => $psProduct->getImageUrl($localLang->id),
+                                        ]
+                                    );
+                                }
+                                break;
+
+                            default:
+                                Log::warning("Tipo de producto desconocido para ID {$psProduct->id_product}");
+                                break;
+                        }
+
+                        // }
+                    }
+                } catch (Throwable $e) {
+                    Log::error('Error during product sync chunk: ' . $e->getMessage(), [
+                        'trace' => $e->getTraceAsString()
+                    ]);
+                }
+            });
+    }
+
+
+
+    function xmlItemProducto($producto, $portes_referencia, $resultado_arrays_correctos, $aOptionsByType, $idLangPs)
+    {
 
         //        // Array de caracteristicas
         //                $caracteristicas_xml = [
@@ -536,8 +866,8 @@ class SyncProductsController extends Controller
                 $q->where('lang_id', $lang->id);
             })
             ->with([
-                'langs'        => fn ($q) => $q->where('lang_id', $lang->id),
-                'references' => fn ($q) => $q->where('lang_id', $lang->id)->with('management'),
+                'langs' => fn($q) => $q->where('lang_id', $lang->id),
+                'references.langs' => fn($q) => $q->where('lang_id', $lang->id),
                 'manufacturer:id,title',
             ])
             ->chunk(100, function ($products) use (&$xml) {
@@ -551,16 +881,19 @@ class SyncProductsController extends Controller
                     }
 
                     $validRefs = $product->references->filter(function ($reference) use ($product, $productLang) {
-                        $price    = (float) $reference->price;
+                        $price    = (float) $reference->langs[0]->price;
                         $minPrice = $product->category_id == 5 ? 20 : 40;
 
                         $sinStock = ($productLang->pivot->stock ?? 0) <= 0; // ajusta si el stock está en otro sitio
 
                         return $price > $minPrice
-                            && $reference->management->estado_gestion != 0
-                            && $reference->management->tags !== 'SEGUNDA MANO'
+                            && $reference->langs[0]->available != 1
+                            && $product->manufacturer_id != 419
+                            && $reference->estado_gestion != 0
+                            && $reference->es_cartucho != 1
+                            && $reference->tags !== 'SEGUNDA MANO'
                             // descarta los que están en estado 2 y sin stock
-                            && !($reference->management->estado_gestion == 2 && $sinStock);
+                            && !($reference->estado_gestion == 2 && $sinStock);
                     });
 
                     if ($validRefs->isEmpty()) {
@@ -578,40 +911,45 @@ class SyncProductsController extends Controller
                         $firstRef = $refs->first(); // reference "representante"
 
                         // Concatenar EAN/UPC de todas las referencias del grupo (solo si hay más de una o por seguridad)
-                        $eanList = $refs->pluck('management.ean')->filter()->unique()->implode(',');
-                        $upcList = $refs->pluck('management.upc')->filter()->unique()->implode(',');
+                        $eanList = $refs->pluck('ean')->filter()->unique()->implode(',');
+                        $upcList = $refs->pluck('upc')->filter()->unique()->implode(',');
 
                         $p = $xml->addChild('product');
                         // SOLO una reference como id
                         $p->addChild('id',        htmlspecialchars($firstRef->reference));
                         $p->addChild('url',       htmlspecialchars($productLang->pivot->url));
                         $p->addChild('name',      htmlspecialchars($productLang->pivot->title));
-                        $p->addChild('price',     $price);
+                        $p->addChild('price',     $firstRef->langs[0]->price);
                         $p->addChild('image',     htmlspecialchars($productLang->pivot->img));
                         $p->addChild('shop',      '');
                         $p->addChild('brand',     htmlspecialchars($product->manufacturer?->title));
 
                         if ($eanList !== '') {
                             $p->addChild('ean', $eanList);
-                        }elseif ($upcList !== '') {
+                        } elseif ($upcList !== '') {
                             $p->addChild('upc', $upcList);
                         }
 
-                        $p->addChild('tag', $firstRef->management->tags);
+                        $p->addChild('tag', $firstRef->tags);
                         $p->addChild('stock', $productLang->pivot->stock > 0 ? 'true' : 'false');
 
-                        switch ($firstRef->management->estado_gestion) {
-                            case '0': $p->addChild('internal_status', 'Anulado');     break;
-                            case '1': $p->addChild('internal_status', 'Activo');      break;
-                            case '2': $p->addChild('internal_status', 'A extinguir'); break;
+                        switch ($firstRef->estado_gestion) {
+                            case '0':
+                                $p->addChild('internal_status', 'Anulado');
+                                break;
+                            case '1':
+                                $p->addChild('internal_status', 'Activo');
+                                break;
+                            case '2':
+                                $p->addChild('internal_status', 'A extinguir');
+                                break;
                         }
 
-                        $p->addChild('codigo_proveedor', $firstRef->management->codigo_proveedor);
+                        $p->addChild('codigo_proveedor', $firstRef->codigo_proveedor);
                         $p->addChild('category', '');
-                        // dump($p);
                     }
+                    // dd($p);
                 }
-
             });
 
         /* ----------------------------------------------------------
@@ -620,7 +958,7 @@ class SyncProductsController extends Controller
         * ---------------------------------------------------------- */
         $dir  = 'xml';
         $timestamp = Carbon::now(config('app.timezone')) // o 'Europe/Madrid'
-                  ->format('Ymd_His');           // 20250723_154233
+            ->format('Ymd_His');           // 20250723_154233
         $file      = "products_{$lang->iso_code}_{$timestamp}.xml";
 
         // Crea la carpeta si no existe
@@ -656,231 +994,278 @@ class SyncProductsController extends Controller
             'Cache-Control'       => 'no-store, no-cache',
         ];
 
-        return response()->streamDownload(function () use ($langIso) {
+        // return response()->streamDownload(function () use ($langIso) {
 
-            $out = fopen('php://output', 'w');
+        //     $out = fopen('php://output', 'w');
 
-            // BOM para que Excel detecte UTF-8
-            fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF));
+        //     // BOM para que Excel detecte UTF-8
+        //     fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
 
-            // Encabezados
-            fputcsv($out, [
-                'id','url','name','price','image','shop','brand','ean','upc',
-                'tag','stock','internal_status','codigo_proveedor','category'
-            ]);
+        //     // Encabezados
+        //     fputcsv($out, [
+        //         'id',
+        //         'url',
+        //         'name',
+        //         'price',
+        //         'image',
+        //         'shop',
+        //         'brand',
+        //         'ean',
+        //         'upc',
+        //         'tag',
+        //         'stock',
+        //         'internal_status',
+        //         'codigo_proveedor',
+        //         'category'
+        //     ]);
 
-            $lang = \App\Models\Lang::iso($langIso);
-            $rowCount = 0;
+        // $lang = \App\Models\Lang::iso($langIso);
+        $lang = Lang::iso($langIso);
 
-            \App\Models\Product::where('available', 1)
-                ->whereHas('langs', fn ($q) => $q->where('lang_id', $lang->id))
-                ->with([
-                    'langs'        => fn ($q) => $q->where('lang_id', $lang->id),
-                    'references'   => fn ($q) => $q->where('lang_id', $lang->id)->with('management'),
-                    'manufacturer:id,title',
-                ])
-                ->chunk(1000, function ($products) use (&$rowCount, $out) {
+        $rowCount = 0;
 
-                    foreach ($products as $product) {
-                        $productLang = $product->langs->first();
-                        if (!$productLang) {
-                            continue;
-                        }
+        // \App\Models\Product::where('available', 1)
+        Product::where('available', 1)
+            ->whereHas('langs', fn($q) => $q->where('lang_id', $lang->id))
+            // ->chunk(1000, function ($products) use (&$rowCount, $out) {
+            ->chunk(1000, function ($products) {
 
-                        foreach ($product->references as $reference) {
-                            $price    = (float) $reference->price;
-                            $minPrice = $product->category_id == 5 ? 20 : 40;
-                            if ($price <= $minPrice) {
-                                continue;
-                            }
-                            if ($reference->management->estado_gestion == 0) {
-                                continue;
-                            }
-                            if($reference->management->tags == 'SEGUNDA MANO'){
-                                continue;
-                            }
-                            $sinStock = ($productLang->pivot->stock ?? 0) <= 0;
-                            if ($reference->management->estado_gestion == 2 && $sinStock) {
-                                continue;
-                            }
 
-                            $ean = $reference->management->ean;
-                            $upc = $reference->management->upc;
 
-                            $internalStatus = match ((string) $reference->management->estado_gestion) {
-                                '0' => 'Anulado',
-                                '1' => 'Activo',
-                                '2' => 'A extinguir',
-                                default => '',
-                            };
+                foreach ($products as $product) {
 
-                            fputcsv($out, [
-                                $reference->reference,
-                                $productLang->pivot->url,
-                                $productLang->pivot->title,
-                                number_format($reference->price, 2, '.', ''),
-                                $productLang->pivot->img,
-                                '',
-                                optional($product->manufacturer)->title,
-                                $ean ?: '',
-                                $ean ? '' : $upc,
-                                $reference->management->tags,
-                                $productLang->pivot->stock > 0 ? 'true' : 'false',
-                                $internalStatus,
-                                $reference->management->codigo_proveedor,
-                                '',
-                            ]);
-                            $rowCount++;
-                        }
+                    $productLang = $product->defaultLang;
+
+                    // Filtrado de referencias válidas (como en xml)
+                    $validRefs = $product->references->filter(function ($reference) use ($product, $productLang) {
+                        dd($reference->langs);
+                        $price = (float) $reference->langs[0]->price;
+                        $minPrice = $product->category_id == 5 ? 20 : 40;
+                        $sinStock = ($productLang->stock ?? 0) <= 0;
+
+                        return $price > $minPrice
+                            && $reference->langs[0]->available != 1
+                            && $product->manufacturer_id != 419
+                            && $reference->estado_gestion != 0
+                            && $reference->es_cartucho != 1
+                            && $reference->tags !== 'SEGUNDA MANO'
+                            && !($reference->estado_gestion == 2 && $sinStock);
+                    });
+
+                    dump($product->id, $productLang, $validRefs);
+                    if ($validRefs->isEmpty()) {
+                        continue;
                     }
-                });
 
-            fclose($out);
+                    // Agrupar por precio normalizado
+                    $groups = $validRefs->groupBy(function ($r) {
+                        return number_format((float) $r->price, 2, '.', '');
+                    });
 
-        }, $filename, $headers);
+                    // Procesar una fila por grupo de precio
+                    foreach ($groups as $price => $refs) {
+
+                        $firstRef = $refs->first();
+
+                        $eanList = $refs->pluck('ean')->filter()->unique()->implode(',');
+                        $upcList = $refs->pluck('upc')->filter()->unique()->implode(',');
+
+                        $internalStatus = match ((string) $firstRef->estado_gestion) {
+                            '0' => 'Anulado',
+                            '1' => 'Activo',
+                            '2' => 'A extinguir',
+                            default => '',
+                        };
+
+                        // fputcsv($out, [
+                        //     $firstRef->reference,
+                        //     $productLang->url,
+                        //     $productLang->title,
+                        //     $firstRef->langs[0]->price,
+                        //     $productLang->img,
+                        //     '',
+                        //     $product->manufacturer?->title,
+                        //     $eanList ?: '',
+                        //     $eanList ? '' : $upcList,
+                        //     $firstRef->tags,
+                        //     $productLang->stock > 0 ? 'true' : 'false',
+                        //     $internalStatus,
+                        //     $firstRef->codigo_proveedor,
+                        //     '',
+                        // ]);
+                        // $rowCount++;
+                    }
+                }
+            });
+
+        //     fclose($out);
+        // }, $filename, $headers);
     }
 
 
     public function jobs()
     {
         dispatch(new SynchronizationProducts);
+        // dispatch(new SyncPrestashopProductsMaster);
 
     }
 
 
-    public static function isBlocked($id_product = null)
+    public static function isBlocked($id_product, $id_lang)
     {
-        $context = Context::getContext();
+        // Mapeo de idioma a país
+        $langToCountry = [
+            1 => 6,   // Español => España
+            2 => 17,  // Inglés => UK
+            3 => 8,   // Francés => Francia
+            4 => 15,  // Alemán => Alemania
+            5 => 1,   // Italiano => Italia
+            6 => 10,  // Portugués => Portugal
+        ];
 
-        $id_country = 6; //default España
-        if ($context->language->id == 1) $id_country = 6;
-        if ($context->language->id == 2) $id_country = 17;
-        if ($context->language->id == 3) $id_country = 8;
-        if ($context->language->id == 4) $id_country = 15;
-        if ($context->language->id == 5) $id_country = 1;
-        if ($context->language->id == 6) $id_country = 10;
+        $id_country = $langToCountry[$id_lang] ?? 6; // Default España
 
-        if (is_object($context->cart) && !empty($context->cart->id_address_delivery)) {
-            $address = new Address($context->cart->id_address_delivery);
-            $id_country = $address->id_country;
-
-        } /*elseif (!empty($context->country->th_country_selected)) {
-            $id_country = $context->country->th_country_selected;
-
-        } elseif (!empty($context->country->id)) {
-            $id_country = $context->country->id;
-        } else {
-            $id_country = Configuration::get('PS_COUNTRY_DEFAULT');
-        }*/
-
-        // dump(Context::getContext());die();
-
-        if (Product::bloqueoMarcasCategorias($id_product, $id_country, 1)) {
+        // Chequeos de bloqueo
+        if (
+            self::bloqueoMarcasCategorias($id_product, $id_country, 1) || // Marca
+            self::bloqueoMarcasCategorias($id_product, $id_country, 2) || // Categoría
+            self::bloqueoFeature($id_product, $id_country) ||            // Características
+            self::bloqueoEtiqueta($id_product, $id_country)              // Etiquetas
+        ) {
             return true;
         }
-        if (Product::bloqueoMarcasCategorias($id_product, $id_country, 2)) {
-            return true;
-        }
-        if (Product::bloqueoFeature($id_product, $id_country)) {
-            return true;
-        }
-        if (Product::bloqueoEtiqueta($id_product, $id_country)) {
-            return true;
-        }
+
         return false;
     }
 
+
     public static function bloqueoMarcasCategorias($id_product, $id_country, $tipo)
     {
+        $conexion = DB::connection('prestashop'); // usa la conexión definida en .env
+
         if ($tipo == 1) {
-            $buscar = DB::getInstance()->getValue("SELECT id_manufacturer FROM aalv_product WHERE id_product = " . $id_product);
-            $buscar_bloqueo = Db::getInstance()->executeS("SELECT id_country,excepcion FROM aalv_bloqueos WHERE id_tipo = 1 AND valor = " . $buscar);
+            $id_manufacturer = $conexion->table('aalv_product')
+                ->where('id_product', $id_product)
+                ->value('id_manufacturer');
+
+            $bloqueos = $conexion->table('aalv_bloqueos')
+                ->where('id_tipo', 1)
+                ->where('valor', $id_manufacturer)
+                ->get();
         } else {
-            $buscar = DB::getInstance()->executeS("SELECT id_category FROM aalv_category_product WHERE id_product = " . $id_product);
-            $id_categories = array_map(function ($item) {
-                return $item["id_category"];
-            }, $buscar);
-            $buscar = implode(",", $id_categories);
-            if (!empty($buscar)) {
-                $buscar_bloqueo = Db::getInstance()->executeS(
-                    "SELECT id_country, excepcion FROM aalv_bloqueos WHERE id_tipo = 2 AND valor IN (" . $buscar . ")"
-                );
+            $categories = $conexion->table('aalv_category_product')
+                ->where('id_product', $id_product)
+                ->pluck('id_category')
+                ->toArray();
+
+            if (!empty($categories)) {
+                $bloqueos = $conexion->table('aalv_bloqueos')
+                    ->where('id_tipo', 2)
+                    ->whereIn('valor', $categories)
+                    ->get();
             } else {
-                $buscar_bloqueo = []; // o null, según lo que necesites
+                $bloqueos = collect();
             }
         }
-        foreach ($buscar_bloqueo as $value) {
-            if ($value['id_country'] != 0) {
-                if ($value['id_country'] == $id_country) {
+
+        foreach ($bloqueos as $bloqueo) {
+            if ($bloqueo->id_country != 0) {
+                if ($bloqueo->id_country == $id_country) {
                     return true;
                 }
-            } else if ($value['id_country'] == 0) {
-                $excepcion = explode(",", $value['excepcion']);
-                $excepcion = array_map('trim', $excepcion);
-                if (in_array($id_country, $excepcion)) {
+            } else {
+                $excepciones = array_map('trim', explode(',', $bloqueo->excepcion));
+                if (in_array($id_country, $excepciones)) {
                     return false;
                 } else {
                     return true;
                 }
             }
         }
+
+        return false; // por defecto
     }
 
     public static function bloqueoFeature($id_product, $id_country)
     {
-        $buscar_feature = DB::getInstance()->executeS("SELECT id_feature_value FROM aalv_feature_product afp WHERE id_product = " . $id_product);
-        foreach ($buscar_feature as $value) {
-            $buscar = DB::getInstance()->executeS("SELECT ab.id_country,ab.valor,ab.excepcion FROM aalv_bloqueos_tipo abt LEFT JOIN aalv_bloqueos ab ON ab.id_tipo = abt.id WHERE abt.codigo != 0 AND abt.codigo = " . $value['id_feature_value']);
-            if (count($buscar) != 0) {
-                foreach ($buscar as $val) {
-                    if ($val['valor'] == 1) {
-                        if ($val['id_country'] != 0) {
-                            if ($val['id_country'] == $id_country) {
-                                return true;
-                            }
-                        } else if ($val['id_country'] == 0) {
-                            $excepcion = explode(",", $val['excepcion']);
-                            $excepcion = array_map('trim', $excepcion);
-                            if (in_array($id_country, $excepcion)) {
-                                return false;
-                            } else {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
+        $conexion = DB::connection('prestashop');
+
+        // Paso 1: Obtener los valores de features del producto
+        $features = $conexion->table('aalv_feature_product')
+            ->where('id_product', $id_product)
+            ->pluck('id_feature_value')
+            ->toArray();
+
+        if (empty($features)) {
+            return false;
         }
-    }
 
-    public static function bloqueoEtiqueta($id_product, $id_country)
-    {
+        // Paso 2: Recorrer cada feature y buscar bloqueos relacionados
+        foreach ($features as $featureValue) {
+            $bloqueos = $conexion->table('aalv_bloqueos_tipo as abt')
+                ->leftJoin('aalv_bloqueos as ab', 'ab.id_tipo', '=', 'abt.id')
+                ->where('abt.codigo', '!=', 0)
+                ->where('abt.codigo', $featureValue)
+                ->select('ab.id_country', 'ab.valor', 'ab.excepcion')
+                ->get();
 
-        try {
-            $buscamos_etiquetas = DB::getInstance()->executeS("SELECT id_country, valor FROM aalv_bloqueos WHERE valor NOT REGEXP '[0-9]'");
-            foreach ($buscamos_etiquetas as $value) {
-                $id_products = DB::getInstance()->executeS(" SELECT
-                                                                    apa.id_product
-                                                            FROM
-                                                                aalv_combinaciones_import aci
-                                                                LEFT JOIN aalv_product_attribute apa ON apa.id_product_attribute = aci.id_product_attribute
-                                                            WHERE
-                                                                apa.id_product = " . $id_product . "
-                                                                AND aci.etiqueta LIKE '%" . $value['valor'] . "%'
-                                                            UNION
-                                                            SELECT id_product FROM aalv_combinacionunica_import WHERE id_product = " . $id_product . " AND etiqueta LIKE '%" . $value['valor'] . "%'");
-                if (count($id_products) > 0) {
-                    if ($id_product) {
-                        if ($value['id_country'] == $id_country) {
+            foreach ($bloqueos as $bloqueo) {
+                if ($bloqueo->valor == 1) {
+                    if ($bloqueo->id_country != 0) {
+                        if ($bloqueo->id_country == $id_country) {
+                            return true;
+                        }
+                    } else {
+                        $excepciones = array_map('trim', explode(',', $bloqueo->excepcion));
+                        if (in_array($id_country, $excepciones)) {
+                            return false;
+                        } else {
                             return true;
                         }
                     }
                 }
             }
-            return false;
-        } catch (Exception $e) {
-            PrestaShopLogger::addLog('Error en bloqueoEtiqueta[' . $e->getMessage() . ']');
-            return false;
         }
+
+        return false;
+    }
+
+    public static function bloqueoEtiqueta($id_product, $id_country)
+    {
+        $conexion = DB::connection('prestashop');
+
+        // 1. Buscar etiquetas que no son números (valor NOT REGEXP '[0-9]')
+        $etiquetas = $conexion->table('aalv_bloqueos')
+            ->whereRaw("valor NOT REGEXP '[0-9]'")
+            ->select('id_country', 'valor')
+            ->get();
+
+        foreach ($etiquetas as $etiqueta) {
+            $valor = $etiqueta->valor;
+
+            // 2. Buscar coincidencias en combinaciones
+            $productosCombinados = $conexion->table('aalv_combinaciones_import as aci')
+                ->leftJoin('aalv_product_attribute as apa', 'apa.id_product_attribute', '=', 'aci.id_product_attribute')
+                ->where('apa.id_product', $id_product)
+                ->where('aci.etiqueta', 'like', '%' . $valor . '%')
+                ->select('apa.id_product');
+
+            // 3. Buscar coincidencias en combinaciones únicas
+            $productosUnicos = $conexion->table('aalv_combinacionunica_import')
+                ->where('id_product', $id_product)
+                ->where('etiqueta', 'like', '%' . $valor . '%')
+                ->select('id_product');
+
+            // 4. Unir ambas consultas con UNION
+            $productos = $productosCombinados->union($productosUnicos)->get();
+
+            if ($productos->count() > 0) {
+                if ($etiqueta->id_country == $id_country) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }

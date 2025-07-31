@@ -22,6 +22,7 @@ class ProductLang extends Model
         'img',
         'comparator',
         'available',
+        'stock',
     ];
 
     protected $casts = [

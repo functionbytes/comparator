@@ -33,4 +33,9 @@ class Stock extends Model
     {
         return $this->belongsTo('App\Models\Prestashop\Product\ProductAttribute', 'id_product_attribute');
     }
+
+    // public function scopeByProduct($query, $product, $product_attribute)
+    // {
+    //     return $query->where('id_product', $product)->where('id_product_attribute', $product_attribute)->first()->quantity;
+    // }
 }

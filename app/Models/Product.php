@@ -60,15 +60,20 @@ class Product extends Model
             'product_id',       // Clave foránea en la tabla pivote hacia este modelo
             'lang_id'           // Clave foránea hacia el modelo Lang
         )
-        ->withPivot([
-            'title',
-            'stock',
-            'url',
-            'img',
-            'comparator',
-            'available',
-        ])
-        ->withTimestamps();
+            ->withPivot([
+                'title',
+                'stock',
+                'url',
+                'img',
+                'comparator',
+                'available',
+            ])
+            ->withTimestamps();
+    }
+
+    public function defaultLang()
+    {
+        return $this->hasOne(ProductLang::class, 'product_id', 'id')->where('product_lang.lang_id', 1);
     }
 
     public function getLangData($langId)
@@ -82,5 +87,4 @@ class Product extends Model
         // Como sigue la convención, NO hace falta indicar claves:
         return $this->belongsTo(Manufacturer::class);
     }
-
 }

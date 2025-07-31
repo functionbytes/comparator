@@ -11,6 +11,7 @@ class Import extends Model
 
     protected $connection = 'prestashop';
     protected $table = "aalv_combinaciones_import";
+    protected $primaryKey = 'id_product_attribute';
     public $timestamps = false;
 
     protected $fillable = [

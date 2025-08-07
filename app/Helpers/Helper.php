@@ -405,6 +405,23 @@ function certificate_date($dates): string {
     return ucwords($date->format('d-m-Y'));
 }
 
+if (!function_exists('formatDate')) {
+    function formatCarbonDate($date, string $format = 'd-m-Y', ?string $locale = null): string
+    {
+        if (empty($date)) {
+            return '';
+        }
+
+        $carbon = $date instanceof \Carbon\Carbon ? $date : \Carbon\Carbon::parse($date);
+
+        if ($locale) {
+            $carbon->locale($locale);
+        }
+
+        return $carbon->translatedFormat($format);
+    }
+}
+
 function humanize_date($dates): string {
     $date = Carbon::parse($dates);
     return ucwords($date->format('F j, Y'));

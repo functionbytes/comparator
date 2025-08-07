@@ -49,6 +49,210 @@ class SyncProductsController extends Controller
         }
     }
 
+
+
+    public function synct($type = 'import')
+    {
+
+        $model = $type === 'import' ? PsCombImport::class : PsCombUnique::class;
+
+        $model::management()
+            ->orderBy($type === 'import' ? 'id_product_attribute' : 'id_product')
+            ->chunk(10, function ($items) {
+
+
+                Log::info('Procesando lote de productos: ' . count($items));
+                try {
+                    foreach ($items as $psCombinationUnicos) {
+
+
+                        $itemCombination  =  $psCombinationUnicos->productAttribute;
+
+                        $product = $psCombinationUnicos->id_product_attribute
+                            ? $itemCombination?->product
+                            : $psCombinationUnicos->product;
+
+                        Log::info('Procesando el productos: ' . $product->id_product);
+                        $categoryId = $product?->baseParentCategory?->id_category;
+
+                        $psManufacturer = $product->manufacturer;
+                        // dd($psManufacturer);
+                        if ($psManufacturer) {
+                            $manufacturer = \App\Models\Manufacturer::updateOrCreate(
+                                ['uid' => $psManufacturer->id_manufacturer],
+                                ['title' => $psManufacturer->name],
+                                ['available' => $psManufacturer->active]
+                            );
+                        } else {
+                            $manufacturer = null;
+                        }
+
+                        $comparatorProduct = Product::updateOrCreate(
+                            ['prestashop_id' => $psCombinationUnicos->getBaseProductId()],
+                            [
+                                'category_id'     => $categoryId,
+                                'manufacturer_id' => $manufacturer?->id,
+                                'available'       => 1,
+                                'type'            => $product?->type(),
+                            ]
+                        );
+
+                        $reference = $psCombinationUnicos->id_product_attribute
+                            ? $itemCombination?->reference
+                            : $psCombinationUnicos->product->reference;
+
+                        $pr = ProductReference::updateOrCreate(
+                            [
+                                'reference'  => $reference,
+                                'product_id' => $comparatorProduct->id,
+                            ],
+                            [
+                                'combination_id'         => $psCombinationUnicos->id_product_attribute ?? null,
+                                'attribute_id'           => $psCombinationUnicos->id_product_attribute ?? null,
+                                'tags'                   => $psCombinationUnicos->etiqueta ?? null,
+                                'id_articulo'            => $psCombinationUnicos->id_articulo ?? null,
+                                'unidades_oferta'        => $psCombinationUnicos->unidades_oferta ?? null,
+                                'estado_gestion'         => $psCombinationUnicos->estado_gestion ?? null,
+                                'es_segunda_mano'        => $psCombinationUnicos->es_segunda_mano ?? 0,
+                                'externo_disponibilidad' => $psCombinationUnicos->externo_disponibilidad ?? 0,
+                                'codigo_proveedor'       => $psCombinationUnicos->codigo_proveedor ?? null,
+                                'precio_costo_proveedor' => $psCombinationUnicos->precio_costo_proveedor ?? null,
+                                'tarifa_proveedor'       => $psCombinationUnicos->tarifa_proveedor ?? null,
+                                'es_arma'                => $psCombinationUnicos->es_arma ?? 0,
+                                'es_arma_fogueo'         => $psCombinationUnicos->es_arma_fogueo ?? 0,
+                                'es_cartucho'            => $psCombinationUnicos->es_cartucho ?? 0,
+                                'ean'                    => $psCombinationUnicos->ean ?? 0,
+                                'upc'                    => $psCombinationUnicos->upc ?? 0,
+                            ]
+                        );
+
+
+                        // Procesamos todos los idiomas del producto
+                        foreach ($product?->langs ?? [] as $lang) {
+
+                            $localLangs = Lang::byIsoCodes([$lang->lang->iso_code])->get()->keyBy('iso_code');
+                            $localLang = $localLangs->get($lang->lang->iso_code);
+
+                            if (!$localLang) {
+                                continue;
+                            }
+
+                            $stock = $psCombinationUnicos->id_product_attribute
+                                ? $itemCombination?->validationStock()
+                                : $product->validationStock();
+
+                            Log::info('Procesando: ' . $localLang->id . ' - ' . $reference . ' - ' . $stock);
+
+                            // ProductLang::updateOrCreate(
+                            //     [
+                            //         'product_id' => $comparatorProduct->id,
+                            //         'lang_id'    => $localLang->id,
+                            //     ],
+                            //     [
+                            //         'title' => $lang->name,
+                            //         'url'   => $lang->url,
+                            //         'img'   => $product?->getImageUrl($localLang->id),
+                            //         'stock' => $stock,
+                            //     ]
+                            // );
+
+                            $productLang = ProductLang::where('product_id', $comparatorProduct->id)
+                                ->where('lang_id', $localLang->id)
+                                ->first();
+
+                            $productLangData = [
+                                'title' => $lang->name,
+                                'url'   => $lang->url,
+                                'img'   => $product?->getImageUrl($localLang->id),
+                                'stock' => $stock,
+                            ];
+
+                            if ($productLang) {
+                                $productLang->update($productLangData);
+                                Log::info("✅ ProductLang actualizado: product_id={$comparatorProduct->id}, lang_id={$localLang->id}");
+                            } else {
+                                ProductLang::create(array_merge([
+                                    'product_id' => $comparatorProduct->id,
+                                    'lang_id'    => $localLang->id,
+                                ], $productLangData));
+                                Log::info("🆕 ProductLang creado: product_id={$comparatorProduct->id}, lang_id={$localLang->id}");
+                            }
+
+
+                            // Precio con IVA
+                            $prices = $psCombinationUnicos->id_product_attribute
+                                ? $psCombinationUnicos->productAttribute?->prices
+                                : $product?->prices;
+
+                            $specificPrice = $prices?->firstWhere('from_quantity', 1);
+                            $finalPriceWithIVA = 0.0;
+
+                            if ($specificPrice) {
+                                $finalPriceWithIVA = round(
+                                    ((float) $specificPrice->price - (float) $specificPrice->reduction)
+                                    * (1 + (float) $localLang->iva / 100),
+                                    2
+                                );
+                            }
+
+                            $atributos = $psCombinationUnicos->id_product_attribute
+                                ? $psCombinationUnicos->productAttribute?->atributosString($localLang->id)
+                                : null;
+
+                            $available = self::isBlocked(
+                                $product?->id_product,
+                                $localLang->id
+                            );
+
+                            // ProductReferenceLang::updateOrCreate(
+                            //     [
+                            //         'reference_id' => $pr->id,
+                            //         'lang_id'      => $localLang->id,
+                            //     ],
+                            //     [
+                            //         'url'            => $lang->url,
+                            //         'characteristics' => $atributos,
+                            //         'price'          => $finalPriceWithIVA,
+                            //         'reduction'      => $specificPrice->reduction ?? 0,
+                            //         'available'      => $available,
+                            //         'img'            => $product?->getImageUrl($localLang->id),
+                            //     ]
+                            // );
+
+                            $productRefLang = ProductReferenceLang::where('reference_id', $pr->id)
+                                ->where('lang_id', $localLang->id)
+                                ->first();
+
+                            $productRefLangData = [
+                                'url'            => $lang->url,
+                                'characteristics' => $atributos,
+                                'price'          => $finalPriceWithIVA,
+                                'reduction'      => $specificPrice->reduction ?? 0,
+                                'available'      => $available,
+                                'img'            => $product?->getImageUrl($localLang->id),
+                            ];
+
+                            if ($productRefLang) {
+                                $productRefLang->update($productRefLangData);
+                                Log::info("✅ ProductReferenceLang actualizado: reference_id={$pr->id}, lang_id={$localLang->id}");
+                            } else {
+                                ProductReferenceLang::create(array_merge([
+                                    'reference_id' => $pr->id,
+                                    'lang_id'      => $localLang->id,
+                                ], $productRefLangData));
+                                Log::info("🆕 ProductReferenceLang creado: reference_id={$pr->id}, lang_id={$localLang->id}");
+                            }
+                        }
+                    }
+                } catch (Throwable $e) {
+                    Log::error('Error during product sync chunk: ' . $e->getMessage(), [
+                        'trace' => $e->getTraceAsString()
+                    ]);
+                }
+            });
+
+    }
+
     public function sync()
     {
         // Obtenemos y anotamos origen
@@ -126,6 +330,10 @@ class SyncProductsController extends Controller
                     ]
                 );
 
+                $stock = $psCombinationUnicos->id_product_attribute
+                    ? $psCombinationUnicos->productAttribute?->stocks?->quantity
+                    : $product->stocks?->quantity;
+
                 // Procesamos todos los idiomas del producto
                 foreach ($product?->langs ?? [] as $lang) {
 
@@ -136,9 +344,6 @@ class SyncProductsController extends Controller
                         continue;
                     }
 
-                    $stock = $psCombinationUnicos->id_product_attribute
-                        ? $psCombinationUnicos->productAttribute?->validationStock()
-                        : $product->validationStock();
 
                     ProductLang::updateOrCreate(
                         [

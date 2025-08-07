@@ -10,7 +10,6 @@ Route::group(['prefix' => 'products'], function () {
 });
 
 
-
 Route::group(['prefix' => 'erp'], function () {
     Route::post('recuperarclienteerp', [ErpController::class, 'recuperarclienteerp']);
     Route::post('recuperaridclienteerp', [ErpController::class, 'recuperaridclienteerp']);

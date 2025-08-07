@@ -139,8 +139,8 @@ use App\Models\ProductLang;
 //     return view('tabla', compact('result'));
 // });
 
-// Route::get('/', [SyncComparatorController::class, 'sync']);
-// Route::get('/', [SyncProductsController::class, 'sync']);
+ Route::get('/sync/comparator', [SyncComparatorController::class, 'sync']);
+Route::get('/sync', [SyncProductsController::class, 'sync']);
 // Route::get('/', [SyncProductsController::class, 'xml']);
 // Route::get('/', [SyncProductsController::class, 'excel']);
 // Route::get('/', [SyncProductsController::class, 'xmlToCsv']);
@@ -149,5 +149,6 @@ use App\Models\ProductLang;
 // Route::get('/', [SyncProductsController::class, 'sync_copi']);
 
 
-Route::get('/', [SyncProductsController::class, 'jobs']);
+Route::get('/synct', [SyncProductsController::class, 'synct']);
+Route::get('/jobs', [SyncProductsController::class, 'jobs']);
 // Route::get('/xml/{lang}', [SyncProductsController::class, 'xml']);

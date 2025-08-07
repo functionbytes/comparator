@@ -84,6 +84,7 @@ class SynchronizationProducts implements ShouldQueue
                         $product = $psCombinationUnicos->id_product_attribute
                             ? $psCombinationUnicos->productAttribute?->product
                             : $psCombinationUnicos->product;
+
                         Log::info('Procesando el productos: ' . $product->id_product);
                         $categoryId = $product?->baseParentCategory?->id_category;
 
@@ -113,6 +114,7 @@ class SynchronizationProducts implements ShouldQueue
                             ? $psCombinationUnicos->productAttribute?->reference
                             : $psCombinationUnicos->product->reference;
 
+
                         $pr = ProductReference::updateOrCreate(
                             [
                                 'reference'  => $reference,
@@ -138,6 +140,12 @@ class SynchronizationProducts implements ShouldQueue
                             ]
                         );
 
+
+                        $stock = $psCombinationUnicos->id_product_attribute
+                            ? $psCombinationUnicos->productAttribute?->stocks?->quantity
+                            : $product->stocks?->quantity;
+
+
                         // Procesamos todos los idiomas del producto
                         foreach ($product?->langs ?? [] as $lang) {
 
@@ -147,10 +155,6 @@ class SynchronizationProducts implements ShouldQueue
                             if (!$localLang) {
                                 continue;
                             }
-
-                            $stock = $psCombinationUnicos->id_product_attribute
-                                ? $psCombinationUnicos->productAttribute?->validationStock()
-                                : $product->validationStock();
 
                             Log::info('Procesando: ' . $localLang->id . ' - ' . $reference . ' - ' . $stock);
 

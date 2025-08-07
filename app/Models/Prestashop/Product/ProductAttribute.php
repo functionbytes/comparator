@@ -191,23 +191,9 @@ class ProductAttribute extends Model
         return $query->addSelect(['atributos_string' => $sub]);
     }
 
-    public function validationStock()
+    public function stocks()
     {
-        switch ($this->product->type()) {
-            case 'combination':
-                return $this->hasOne('App\Models\Prestashop\Stock',
-                'id_product_attribute', 'id_product_attribute')->first()?->quantity;
-
-                break;
-
-            case 'simple':
-                return $this->hasOne('App\Models\Prestashop\Stock',
-                'id_product', 'id_product')->first()?->quantity;
-                break;
-
-            default:
-                break;
-        }
+        return $this->hasOne('App\Models\Prestashop\Stock','id_product_attribute', 'id_product_attribute');
     }
 
 }

@@ -53,5 +53,11 @@ class All extends Model
         return $query->where('estado_gestion', '!=', 0);
     }
 
+    public function productAttribute()
+    {
+        return $this->hasOne('App\Models\Prestashop\Product\ProductAttribute', 'id_product_attribute', 'id_product_attribute')->select('id_product','reference','id_product_attribute');
+    }
+
+
 
 }

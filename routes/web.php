@@ -140,11 +140,14 @@ use App\Models\ProductLang;
 // });
 
 // Route::get('/', [SyncComparatorController::class, 'sync']);
-Route::get('/', [SyncProductsController::class, 'sync']);
+// Route::get('/', [SyncProductsController::class, 'sync']);
 // Route::get('/', [SyncProductsController::class, 'xml']);
 // Route::get('/', [SyncProductsController::class, 'excel']);
+// Route::get('/', [SyncProductsController::class, 'xmlToCsv']);
+// Route::get('/', [SyncProductsController::class, 'excelToDisk']);
+// Route::get('/', [SyncProductsController::class, 'xmlToDisk']);
 // Route::get('/', [SyncProductsController::class, 'sync_copi']);
 
 
-// Route::get('/', [SyncProductsController::class, 'jobs']);
+Route::get('/', [SyncProductsController::class, 'jobs']);
 // Route::get('/xml/{lang}', [SyncProductsController::class, 'xml']);

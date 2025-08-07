@@ -24,7 +24,7 @@ return new class extends Migration
             $table->timestamps();
             $table->foreign('reference_id')->references('id')->on('product_reference')->onDelete('cascade');
             $table->foreign('lang_id')->references('id')->on('langs')->onDelete('cascade');
-            $table->unique(['reference_id', 'id', 'lang_id'], 'product_reference_lang_unique');
+            $table->unique(['reference_id', 'lang_id'], 'product_reference_lang_unique');
         });
     }
 

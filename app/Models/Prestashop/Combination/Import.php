@@ -15,7 +15,6 @@ class Import extends Model
     public $timestamps = false;
 
     protected $fillable = [
-        'id',
         'id_product_attribute',
         'id_origen',
         'id_articulo',
@@ -44,9 +43,28 @@ class Import extends Model
         return $query->whereIn('id_product_attribute', $ids);
     }
 
-    public function scopeAvailable($query)
+    public function scopeManagement($query)
     {
-        return $query->where('activo', 1);
+        return $query->where('estado_gestion', '!=', 0);
+    }
+
+    public function productAttribute()
+    {
+        return $this->hasOne('App\Models\Prestashop\Product\ProductAttribute', 'id_product_attribute', 'id_product_attribute')->select('id_product','reference','id_product_attribute');
+    }
+
+    public function getBaseProduct(): ?\App\Models\Prestashop\Product\Product
+    {
+        return $this->id_product_attribute
+            ? $this->productAttribute?->product
+            : $this->product;
+    }
+
+    public function getBaseProductId(): ?int
+    {
+        return $this->id_product_attribute
+            ? $this->productAttribute?->id_product
+            : $this->id_product;
     }
 
 

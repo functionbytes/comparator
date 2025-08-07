@@ -22,7 +22,7 @@ return new class extends Migration
             $table->softDeletes();
             $table->foreign('product_id')->references('id') ->on('products')->onDelete('cascade');
             $table->foreign('lang_id')->references('id')->on('langs')->onDelete('cascade');
-            $table->unique(['product_id', 'lang_id','id'], 'product_lang_unique');
+            $table->unique(['product_id', 'lang_id'], 'product_lang_unique');
 
         });
     }

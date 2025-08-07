@@ -17,7 +17,7 @@ class Manufacturer extends Model
 
     protected $fillable = [
         'title',
-        'slug',
+        'uid',
         'available',
         'created_at',
         'updated_at'

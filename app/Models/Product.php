@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Product extends Model
 {
@@ -86,5 +87,10 @@ class Product extends Model
         // manufacturer_id vive en la propia tabla products
         // Como sigue la convención, NO hace falta indicar claves:
         return $this->belongsTo(Manufacturer::class);
+    }
+
+    public function importtt(): HasOne
+    {
+        return $this->hasOne('App\Models\Prestashop\Product\ProductImport', 'id_product', 'prestashop_id');
     }
 }

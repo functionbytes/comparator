@@ -28,6 +28,12 @@ class Product extends Model
         'date_upd',
     ];
 
+    public function scopeComparadorProduct($query)
+    {
+        return $query->select('id_category_default');
+    }
+
+
     public function newCollection(array $models = [])
     {
         return (new class($models) extends Collection {
@@ -82,7 +88,7 @@ class Product extends Model
         );
     }
 
-   public function combinationStock()
+    public function combinationStock()
     {
         return $this->hasMany(
             'App\Models\Prestashop\Stock',
@@ -181,7 +187,7 @@ class Product extends Model
 
     public function manufacturer()
     {
-        return $this->belongsToMany('App\Models\Prestashop\Manufacturer',  'id_manufacturer');
+        return $this->hasOne('App\Models\Prestashop\Manufacturer',  'id_manufacturer', 'id_manufacturer');
     }
 
     public function lang()
@@ -205,6 +211,7 @@ class Product extends Model
     {
         return $this->hasOne('App\Models\Prestashop\Product\ProductImport', 'id_product', 'id_product');
     }
+
 
     public function scopeType()
     {

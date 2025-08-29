@@ -17,6 +17,7 @@ return new class extends Migration
             $table->unsignedBigInteger('manufacturer_id')->nullable();
             $table->unsignedBigInteger('provider_id')->nullable();
             $table->unsignedBigInteger('prestashop_id')->nullable();
+            $table->unsignedBigInteger('id_modelo')->nullable();
             $table->unsignedBigInteger('article_id')->nullable();
             $table->unsignedBigInteger('category_id')->nullable();
             $table->tinyInteger('available')->default(0);

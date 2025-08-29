@@ -20,9 +20,6 @@ class ProductLang extends Model
         'title',
         'url',
         'img',
-        'comparator',
-        'available',
-        'stock',
     ];
 
     protected $casts = [
@@ -31,8 +28,6 @@ class ProductLang extends Model
         'title'          => 'string',
         'url'            => 'string',
         'img'            => 'string',
-        'comparator'     => 'boolean',
-        'available'      => 'boolean',
         'created_at'     => 'datetime',
         'updated_at'     => 'datetime',
         'deleted_at'     => 'datetime',

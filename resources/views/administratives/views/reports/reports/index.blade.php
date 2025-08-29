@@ -1,102 +1,292 @@
 @extends('layouts.administratives')
 
 @section('content')
-
-  @include('managers.includes.card', ['title' => 'Documentos'])
-
-  <div class="widget-content searchable-container list">
+<div class="widget-content searchable-container list">
+    {{-- Tarjeta con el formulario de filtros (migración del PHP puro) --}}
     <div class="card card-body">
-      <div class="row">
-        <div class="col-md-12 col-xl-12">
-          <form class="position-relative form-search" action="{{ request()->fullUrl() }}" method="GET">
-            <div class="row justify-content-between g-2 ">
-              <div class="col-auto flex-grow-1">
-                <div class="tt-search-box">
-                  <div class="input-group">
-                    <span class="position-absolute top-50 start-0 translate-middle-y ms-2"> <i data-feather="search"></i></span>
-                    <input class="form-control rounded-start w-100" type="text" id="search" name="search" placeholder="Buscar" @isset($searchKey) value="{{ $searchKey }}" @endisset>
-                  </div>
-                </div>
-              </div>
-              <div class="col-auto">
-                <div class="input-group">
-                  <select class="form-select select2" name="available" data-minimum-results-for-search="Infinity">
-                    <option value="">Seleccionar estado</option>
-                    <option value="1" @isset($available) @if ($available==1) selected @endif @endisset>  Publico</option>
-                    <option value="0" @isset($available) @if ($available==0) selected  @endif @endisset>  Oculto</option>
-                  </select>
-                </div>
-              </div>
-              <div class="col-auto">
-                <button type="submit" class="btn btn-primary" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-original-title="Buscar">
-                  <i class="fa-duotone fa-magnifying-glass"></i>
-                </button>
-              </div>
-              <div class="col-auto">
+        <script>
+            window.lista_nombres = @json($listaNombres);
+        </script>
 
-              </div>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-    <div class="card card-body">
-      <div class="table-responsive">
-        <table class="table search-table align-middle text-nowrap">
-          <thead class="header-item">
-              <tr>
-                <th>Orden</th>
-                <th>Cliente</th>
-                <th>Estado</th>
-                <th>Fecha</th>
-                <th>Acciones</th>
-              </tr>
-          </thead>
-          <tbody>
-              @foreach ($documents as $key => $document)
-                <tr class="search-items">
-                  <td>
-                      ({{ $document->order_id }}) ({{ $document->order->reference }})
-                  </td>
-                  <td>
-                        {{ $document->customer->firstname }}  {{ $document->customer->lastname }}
-                  </td>
-                  <td>
-                      <span class="badge {{ $document->proccess == 1 ? 'bg-light-primary' : 'bg-light-secondary' }} rounded-3 py-2 text-primary fw-semibold fs-2 d-inline-flex align-items-center gap-1">
-                           {{ $document->proccess == 1 ? 'Gestionado' : 'Pendiente' }}
-                      </span>
-                  </td>
-                  <td>
-                    <span class="usr-ph-no" data-phone="{{ date('Y-m-d', strtotime($document->updated_at)) }}">{{ date('Y-m-d', strtotime($document->updated_at)) }}</span>
-                  </td>
-                  <td class="text-left">
-                    <div class="dropdown dropstart">
-                      <a href="#" class="text-muted" id="dropdownMenuButton" data-bs-toggle="dropdown" aria-expanded="false">
-                        <i class="ti ti-dots fs-5"></i>
-                      </a>
-                      <ul class="dropdown-menu" aria-labelledby="dropdownMenuButton">
-                        <li>
-                          <a class="dropdown-item d-flex align-items-center gap-3" href="{{ route('administrative.documents.edit', $document->uid) }}">Editar</a>
-                        </li>
-                          <li>
-                              <a class="dropdown-item d-flex align-items-center gap-3" href="{{ route('administrative.documents.view', $document->uid) }}">Visualizar</a>
-                          </li>
-                      </ul>
+        <form method="get"
+              action="/administrative/reports/view"
+              id="form_filtros"
+              @if($buscando) class="generar_informe" @endif>
+
+            {{-- Parámetros calculados por JS --}}
+            <input type="hidden" name="sport" id="sport" value="">
+            <input type="hidden" name="status" id="status" value="">
+
+            <div class="list-filter">
+
+                {{-- Filtros guardados --}}
+                <div class="list-filter-row">
+                    <i class="fa fa-plus fa_variable2"></i>
+                    <b class="fa_variable2">Filtros guardados</b><br />
+                    <div class="filtros_guardados invisible row">
+                        @foreach($filtrosGuardados as $f)
+                            <div class="col-xs-offset-1 col-xs-3">
+                                <i class="fa fa-times cursor-pointer remove_filter"
+                                   id_filtro="{{ $f['id'] }}"
+                                   style="border-right:1px solid black;padding-right:10px;margin-right:10px;"></i>
+                                <a href="{{ $f['href'] }}" title="{{ $f['tooltip'] }}">{{ $f['name'] }}</a>
+                            </div>
+                        @endforeach
                     </div>
-                  </td>
-                </tr>
-              @endforeach
-          </tbody>
-        </table>
-      </div>
-      <div class="result-body ">
-        <span>Mostrar {{ $documents->firstItem() }}-{{ $documents->lastItem() }} de {{ $documents->total() }} resultados</span>
-        <nav>
-          {{ $documents->appends(request()->input())->links() }}
-        </nav>
-      </div>
-    </div>
-  </div>
+                </div>
+
+                <hr />
+
+                {{-- Deportes (sin name, solo data-key para JS) --}}
+                <div class="list-filter-row">
+                    <b>Deportes</b>:
+                    <table width="100%" style="margin-top:5px;text-align:center;" class="sports_table">
+                        <tr>
+                            @php $pos = 0; @endphp
+                            @foreach($datos['sports'] as $nombre => $sport)
+                                <td width="33%">
+                                    <input type="checkbox"
+                                           class="show_sport"
+                                           id="show_{{ $nombre }}"
+                                           data-sport-key="{{ $nombre }}"
+                                           @checked($sport) />
+                                    <label for="show_{{ $nombre }}">{{ strtoupper($nombre) }}</label>
+                                </td>
+                                @php $pos++; @endphp
+                                @if($pos % 3 === 0)
+                                    </tr><tr>
+                                @endif
+                            @endforeach
+                        </tr>
+                    </table>
+                </div>
+
+                <hr />
+
+                {{-- Estado en gestión (sin name; se consolidan en hidden #status) --}}
+                <div class="list-filter-row">
+                    <b>Estado en gestión</b>
+                    <table width="100%" style="margin-top:5px;text-align:center;">
+                        <tr>
+                            @foreach($datos['status'] as $nombre => $mostrar)
+                                <td width="25%">
+                                    <label class="switch d-inline-flex align-items-center gap-2">
+                                        <input type="checkbox"
+                                               class="data_status"
+                                               value="{{ $nombre }}"
+                                               @checked($mostrar)>
+                                        <span class="slider round"></span>
+                                        <span>{{ $nombre }}</span>
+                                    </label>
+                                </td>
+                            @endforeach
+                        </tr>
+                    </table>
+                </div>
+
+                <hr />
+
+                {{-- País / idioma (al cambiar recarga el índice para refrescar competidores) --}}
+                <div class="list-filter-row">
+                    <b>País a comparar</b><br />
+                    <div class="mt-2" style="text-align:center;">
+                        @foreach(['es'=>'España','pt'=>'Portugal','fr'=>'Francia','de'=>'Alemania','it'=>'Italia'] as $iso => $label)
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input rb_idioma"
+                                       type="radio"
+                                       name="iso_code"
+                                       id="rb_{{ $iso }}"
+                                       value="{{ $iso }}"
+                                       @checked($datos['idioma'][$iso] ?? false)>
+                                <label class="form-check-label" for="rb_{{ $iso }}">{{ $label }}</label>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+
+                <hr />
+
+                {{-- Etiqueta --}}
+                <div class="list-filter-row">
+                    <b>Etiqueta</b><br />
+                    <select id="select_etiqueta" name="etiqueta" class="form-control data" style="width:95%;display:inline;">
+                        <option value="">Seleccione etiqueta</option>
+                        @foreach($datos['etiquetas'] as $nombreEtiqueta)
+                            <option value="{{ $nombreEtiqueta }}" @selected(($datos['etiquetasSelect'] ?? '' )===$nombreEtiqueta)>
+                                {{ $nombreEtiqueta }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+
+                <hr />
+
+                {{-- Proveedor --}}
+                <div class="list-filter-row">
+                    <b>Proveedor</b><br />
+                    <select id="select_proveedor" name="proveedor" class="form-control data" style="width:95%;display:inline;">
+                        <option value="">Seleccione proveedor</option>
+                        @foreach($datos['proveedor'] as $p)
+                            <option value="{{ $p->nombre }}" @selected(($datos['proveedorSelect'] ?? '' )===$p->nombre)>
+                                {{ $p->nombre }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+
+                <hr />
+
+                {{-- Competidores (UI: listas duales, cargados por ISO desde BD) --}}
+                <div class="list-filter-row">
+                    <div class="filtros_adicionales row" style="margin-top:10px;text-align:center;">
+                        <table width="100%" style="margin-top:10px;text-align:center;">
+                            <tr>
+                                <td colspan="3" style="padding-bottom:15px;">
+                                    <hr />
+                                    <big>
+                                        <b>Competidores Que Incluir</b>
+                                        <i class="fa fa-info-circle" style="color:blue;"
+                                           title="Si no hay ninguno seleccionado, se considerarán todos los competidores disponibles para el país."></i>
+                                    </big><br />
+                                </td>
+                            </tr>
+
+                            <tr>
+                                {{-- Disponibles --}}
+                                <td width="45%">
+                                    <b>Disponibles</b><br />
+                                    <select multiple id="competidores_disponibles" size="10" style="width:15em;">
+                                        @foreach($datos['competidores'] as $c)
+                                            <option value="{{ $c->id }}" class="opt_disp"
+                                                @if(!(int)$c->available) disabled @endif>
+                                                {{ $c->nombre }}@if(!(int)$c->available) (no disponible)@endif
+                                            </option>
+                                        @endforeach
+                                    </select>
+                                </td>
+
+                                {{-- Botonera mover --}}
+                                <td width="10%" valign="middle">
+                                    <button type="button" id="compet_incl_all" class="btn btn-secondary btn-xs btn_comp" title="Incluir todos">
+                                        <i class="fa fa-angle-double-right"></i>
+                                    </button><br />
+                                    <button type="button" id="compet_incl_sel" class="btn btn-secondary btn-xs btn_comp" title="Incluir seleccionados">
+                                        <i class="fa fa-angle-right"></i>
+                                    </button><br />
+                                    <hr />
+                                    <button type="button" id="compet_quit_sel" class="btn btn-secondary btn-xs btn_comp" title="Quitar seleccionados">
+                                        <i class="fa fa-angle-left"></i>
+                                    </button><br />
+                                    <button type="button" id="compet_quit_all" class="btn btn-secondary btn-xs btn_comp" title="Quitar todos">
+                                        <i class="fa fa-angle-double-left"></i>
+                                    </button><br />
+                                </td>
+
+                                {{-- Seleccionados --}}
+                                <td width="45%">
+                                    <b>Seleccionados</b><br />
+                                    <select multiple id="competidores_seleccionados" size="10" style="width:15em;">
+                                        {{-- Vacío al cargar; se va llenando con la botonera --}}
+                                    </select>
+                                </td>
+                            </tr>
+                        </table>
+
+                        {{-- Si quieres enviar seleccionados por GET, descomenta: --}}
+                        {{-- <input type="hidden" id="competidores_ids" name="competidores_ids" value=""> --}}
+                    </div>
+                </div>
+
+                <hr />
+
+                {{-- Botón GENERAR INFORME --}}
+                <div class="list-filter-row text-center">
+                    <div id="botones_informe" class="d-flex justify-content-center gap-3 my-3">
+                        <button type="submit"
+                                id="submit_form"
+                                class="btn btn-success"
+                                @disabled($buscando)>
+                            GENERAR INFORME
+                        </button>
+                    </div>
+                </div>
+
+            </div> {{-- /.list-filter --}}
+        </form>
+    </div> {{-- /.card card-body --}}
+</div> {{-- /.widget-content --}}
+
+{{-- JS para armar parámetros y UX de competidores/idioma --}}
+<script>
+(function() {
+    const SPORT_MAP = {
+        golf: 3,
+        caza: 4,
+        pesca: 5,
+        hipica: 6,
+        buceo: 7,
+        nautica: 8,
+        esqui: 9,
+        padel: 10,
+        aventura: 11
+    };
+
+    const form = document.getElementById('form_filtros');
+    const sportH = document.getElementById('sport');
+    const statusH = document.getElementById('status');
+
+    // ====== Submit: SPORT y STATUS ======
+    form.addEventListener('submit', function() {
+        // SPORT (CSV)
+        const selectedSports = Array.from(form.querySelectorAll('.show_sport:checked'))
+            .map(cb => SPORT_MAP[(cb.getAttribute('data-sport-key') || '').toLowerCase()])
+            .filter(Boolean);
+        sportH.value = selectedSports.join(',');
+
+        // STATUS (con guiones)
+        const selectedStatus = Array.from(form.querySelectorAll('.data_status:checked'))
+            .map(cb => cb.value);
+        statusH.value = selectedStatus.join('-');
+
+        // Si decides enviar competidores seleccionados:
+        // const out = Array.from(document.querySelectorAll('#competidores_seleccionados option'))
+        //     .map(o => o.value);
+        // const hidden = document.getElementById('competidores_ids');
+        // if (hidden) hidden.value = out.join(',');
+    });
+
+    // ====== Cambio de idioma: recarga índice con ?idioma=xx para refrescar competidores ======
+    document.querySelectorAll('.rb_idioma').forEach(rb => {
+        rb.addEventListener('change', function() {
+            if (!this.checked) return;
+            const iso = this.value;
+            const base = "{{ url()->current() }}";
+            // Si quisieras preservar otros parámetros del índice, añade aquí query extras.
+            window.location.href = base + '?idioma=' + encodeURIComponent(iso);
+        });
+    });
+
+    // ====== Botonera mover competidores (solo UI) ======
+    const disp = document.getElementById('competidores_disponibles');
+    const sel  = document.getElementById('competidores_seleccionados');
+
+    function moveSelected(from, to) {
+        Array.from(from.selectedOptions).forEach(opt => {
+            to.appendChild(opt);
+            opt.selected = false;
+        });
+    }
+    function moveAll(from, to) {
+        Array.from(from.options).forEach(opt => {
+            to.appendChild(opt);
+            opt.selected = false;
+        });
+    }
+
+    document.getElementById('compet_incl_all').addEventListener('click', () => moveAll(disp, sel));
+    document.getElementById('compet_incl_sel').addEventListener('click', () => moveSelected(disp, sel));
+    document.getElementById('compet_quit_sel').addEventListener('click', () => moveSelected(sel, disp));
+    document.getElementById('compet_quit_all').addEventListener('click', () => moveAll(sel, disp));
+})();
+</script>
 @endsection
-
-

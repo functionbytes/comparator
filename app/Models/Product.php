@@ -21,6 +21,7 @@ class Product extends Model
         'manufacturer_id',
         'provider_id',
         'prestashop_id',
+        'id_modelo',
         'article_id',
         'category_id',
         'type',
@@ -63,13 +64,16 @@ class Product extends Model
         )
             ->withPivot([
                 'title',
-                'stock',
                 'url',
                 'img',
-                'comparator',
-                'available',
             ])
             ->withTimestamps();
+    }
+
+    // Útil para otras consultas
+    public function lang(): HasMany
+    {
+        return $this->hasMany(ProductLang::class, 'product_id', 'id');
     }
 
     public function defaultLang()

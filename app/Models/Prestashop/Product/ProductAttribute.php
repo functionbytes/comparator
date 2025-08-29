@@ -81,14 +81,14 @@ class ProductAttribute extends Model
             'id_product_attribute'
         )->where('id_country', 0)
             ->where(function ($query) {
-            $query->where('from', '<=', now())
-                ->orWhereNull('from')
-                ->orWhere('from', '0000-00-00 00:00:00');
-        })->where(function ($query) {
-            $query->where('to', '>=', now())
-                ->orWhereNull('to')
-                ->orWhere('to', '0000-00-00 00:00:00');
-        });
+                $query->where('from', '<=', now())
+                    ->orWhereNull('from')
+                    ->orWhere('from', '0000-00-00 00:00:00');
+            })->where(function ($query) {
+                $query->where('to', '>=', now())
+                    ->orWhereNull('to')
+                    ->orWhere('to', '0000-00-00 00:00:00');
+            });
     }
 
 
@@ -106,12 +106,13 @@ class ProductAttribute extends Model
         return $url;
     }
 
-    public function validationCombination(){
+    public function validationCombination()
+    {
 
         $product =  $this->product;
         $combinations = $product->combinations;
 
-        $type = count($combinations)>0 ? 'combination' : 'simple';
+        $type = count($combinations) > 0 ? 'combination' : 'simple';
 
         switch ($type) {
             case 'combination':
@@ -134,12 +135,12 @@ class ProductAttribute extends Model
 
     public function unique(): BelongsTo
     {
-        return $this->belongsTo('App\Models\Prestashop\Combination\Unique' ,'id_product' ,'id_product_attribute');
+        return $this->belongsTo('App\Models\Prestashop\Combination\Unique', 'id_product', 'id_product_attribute');
     }
 
     public function import(): BelongsTo
     {
-        return $this->belongsTo('App\Models\Prestashop\Combination\Import' ,'id_product_attribute' ,'id_product_attribute');
+        return $this->belongsTo('App\Models\Prestashop\Combination\Import', 'id_product_attribute', 'id_product_attribute');
     }
 
     /**
@@ -153,12 +154,12 @@ class ProductAttribute extends Model
             ->join('aalv_attribute as a', 'a.id_attribute', '=', 'pac.id_attribute')
             ->join('aalv_attribute_lang as al', function ($j) use ($idLang) {
                 $j->on('al.id_attribute', '=', 'a.id_attribute')
-                ->where('al.id_lang', '=', $idLang);
+                    ->where('al.id_lang', '=', $idLang);
             })
             ->join('aalv_attribute_group as ag', 'ag.id_attribute_group', '=', 'a.id_attribute_group')
             ->join('aalv_attribute_group_lang as agl', function ($j) use ($idLang) {
                 $j->on('agl.id_attribute_group', '=', 'ag.id_attribute_group')
-                ->where('agl.id_lang', '=', $idLang);
+                    ->where('agl.id_lang', '=', $idLang);
             })
             ->where('pa.id_product', $this->id_product)
             ->where('pa.id_product_attribute', $this->id_product_attribute)
@@ -178,14 +179,14 @@ class ProductAttribute extends Model
             ->join('aalv_attribute as a', 'a.id_attribute', '=', 'pac.id_attribute')
             ->join('aalv_attribute_lang as al', function ($j) use ($idLang) {
                 $j->on('al.id_attribute', '=', 'a.id_attribute')
-                ->where('al.id_lang', '=', $idLang);
+                    ->where('al.id_lang', '=', $idLang);
             })
             ->join('aalv_attribute_group as ag', 'ag.id_attribute_group', '=', 'a.id_attribute_group')
             ->join('aalv_attribute_group_lang as agl', function ($j) use ($idLang) {
                 $j->on('agl.id_attribute_group', '=', 'ag.id_attribute_group')
-                ->where('agl.id_lang', '=', $idLang);
+                    ->where('agl.id_lang', '=', $idLang);
             })
-            ->whereColumn('pac.id_product_attribute', $this->getTable().'.id_product_attribute')
+            ->whereColumn('pac.id_product_attribute', $this->getTable() . '.id_product_attribute')
             ->selectRaw("GROUP_CONCAT(CONCAT(agl.name, ': ', al.name) ORDER BY al.name SEPARATOR ' | ')");
 
         return $query->addSelect(['atributos_string' => $sub]);
@@ -193,7 +194,15 @@ class ProductAttribute extends Model
 
     public function stocks()
     {
-        return $this->hasOne('App\Models\Prestashop\Stock','id_product_attribute', 'id_product_attribute');
+        return $this->hasOne('App\Models\Prestashop\Stock', 'id_product_attribute', 'id_product_attribute');
     }
 
+    public function pricesForIso(string $iso)
+    {
+        return $this->hasMany(
+            \App\Models\Prestashop\Specific\SpecificPrice::class,
+            'id_product_attribute',
+            'id_product_attribute'
+        )->forIso($iso); // sin ->activeWindow() aquí
+    }
 }

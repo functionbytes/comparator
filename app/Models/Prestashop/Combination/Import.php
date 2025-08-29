@@ -45,7 +45,7 @@ class Import extends Model
 
     public function scopeManagement($query)
     {
-        return $query->where('estado_gestion', '!=', 0);
+        return $query->where('estado_gestion', '!=', 0)->where('es_segunda_mano', '!=', 1);
     }
 
     public function productAttribute()

@@ -6,6 +6,15 @@ use Illuminate\Support\Facades\Route;
 use App\Models\ProductReference;
 use App\Models\ProductReferenceLang;
 use App\Models\ProductLang;
+use App\Http\Controllers\Administrative\ReportController;
+
+use App\Http\Controllers\PriceChangeController;
+
+
+
+
+Route::post('/comparador/precio-cambio', [PriceChangeController::class, 'store'])
+    ->name('precio-cambio.store'); // 👈 fuerza guard web
 
 // Route::get('/', function () {
 //     dd('asd');
@@ -139,16 +148,18 @@ use App\Models\ProductLang;
 //     return view('tabla', compact('result'));
 // });
 
- Route::get('/sync/comparator', [SyncComparatorController::class, 'sync']);
-Route::get('/sync', [SyncProductsController::class, 'sync']);
+// Route::get('', [SyncComparatorController::class, 'syncAll']);
+// Route::get('/', [SyncProductsController::class, 'sync']);
 // Route::get('/', [SyncProductsController::class, 'xml']);
 // Route::get('/', [SyncProductsController::class, 'excel']);
 // Route::get('/', [SyncProductsController::class, 'xmlToCsv']);
-// Route::get('/', [SyncProductsController::class, 'excelToDisk']);
+Route::get('/', [SyncProductsController::class, 'excelToDisk']);
 // Route::get('/', [SyncProductsController::class, 'xmlToDisk']);
 // Route::get('/', [SyncProductsController::class, 'sync_copi']);
 
 
-Route::get('/synct', [SyncProductsController::class, 'synct']);
-Route::get('/jobs', [SyncProductsController::class, 'jobs']);
+// Route::get('/synct', [SyncProductsController::class, 'synct']);
+// Route::get('/', [SyncProductsController::class, 'jobs']);
 // Route::get('/xml/{lang}', [SyncProductsController::class, 'xml']);
+
+// Route::get('/', [ReportController::class, 'index']);

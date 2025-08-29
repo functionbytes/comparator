@@ -13,9 +13,6 @@ return new class extends Migration
             $table->unsignedBigInteger('product_id');
             $table->unsignedBigInteger('lang_id');
             $table->string('title')->nullable();
-            $table->integer('stock')->default(0);
-            $table->tinyInteger('comparator')->default(0);
-            $table->tinyInteger('available')->default(0);
             $table->text('url')->nullable();
             $table->text('img')->nullable();
             $table->timestamps();

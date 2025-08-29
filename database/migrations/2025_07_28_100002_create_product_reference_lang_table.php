@@ -18,6 +18,7 @@ return new class extends Migration
             $table->text('characteristics')->nullable();
             $table->unsignedBigInteger('reference_id')->nullable();
             $table->decimal('price', 12, 2)->default(0.00);
+            $table->decimal('portes', 12, 2)->default(0.00);
             $table->decimal('reduction', 20, 6)->default(0);
             $table->tinyInteger('available')->default(0);
             $table->softDeletes();

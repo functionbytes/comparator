@@ -22,11 +22,12 @@ class Lang extends Model
         'iso_code',
         'lenguage_code',
         'locate',
+        'iva',
         'date_format_full',
         'date_format_lite',
         'available',
         'created_at',
-        'updated_at'
+        'updated_at',
     ];
 
     public function scopeByIsoCodes($query, $isoCodes)
@@ -133,4 +134,8 @@ class Lang extends Model
         return $this->belongsToMany('App\Models\Product', 'product_lang', 'lang_id', 'product_id');
     }
 
+    public function getVatRate(): float
+    {
+        return max(0, (int)$this->iva) / 100;
+    }
 }

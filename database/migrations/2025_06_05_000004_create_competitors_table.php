@@ -12,13 +12,16 @@ return new class extends Migration
             $table->bigIncrements('id');
             $table->char('uid', 36)->unique();
             $table->string('title');
+            $table->string('iso_code', 5);                      // 👈 NUEVO
             $table->tinyInteger('available')->default(0);
             $table->timestamps();
+
+            $table->unique(['title', 'iso_code']);              // 👈 NUEVO (evita duplicados por país)
         });
     }
 
     public function down(): void
     {
-        Schema::dropIfExists('sellers');
+        Schema::dropIfExists('competitors'); // 👈 corregido (antes decía 'sellers')
     }
 };

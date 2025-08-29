@@ -8,6 +8,7 @@ use App\Models\Prestashop\Combination\Unique as PrestashopCombinationUnique;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Product extends Model
 {
@@ -195,7 +196,7 @@ class Product extends Model
         return $this->hasOne('App\Models\Prestashop\Product\ProductLang', 'id_product', 'id_product')->where('id_lang', 1);
     }
 
-    public function langs()
+    public function langs(): HasMany
     {
         return $this->hasMany('App\Models\Prestashop\Product\ProductLang', 'id_product');
     }
@@ -225,5 +226,15 @@ class Product extends Model
             'id_product',
             'id_product'
         );
+    }
+
+    public function pricesForIso(string $iso)
+    {
+        return $this->hasMany(
+            \App\Models\Prestashop\Specific\SpecificPrice::class,
+            'id_product',
+            'id_product'
+        )->activeWindow()
+            ->forIso($iso);
     }
 }

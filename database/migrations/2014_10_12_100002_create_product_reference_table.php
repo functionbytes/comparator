@@ -14,17 +14,11 @@ return new class extends Migration
         Schema::create('product_reference', function (Blueprint $table) {
             $table->bigIncrements('id');
             $table->string('reference')->nullable();
-            // $table->string('url', 2048)->nullable();
-            // $table->unsignedBigInteger('lang_id')->nullable();
+            $table->integer('default_minderest')->default(0);
             $table->unsignedBigInteger('combination_id')->nullable();
             $table->unsignedBigInteger('attribute_id')->nullable();
-            // $table->text('characteristics')->nullable();
+            $table->integer('stock')->default(0);
             $table->unsignedBigInteger('product_id')->nullable();
-            // $table->decimal('price', 12, 2)->default(0.00);
-            // $table->decimal('reduction', 20, 6)->default(0);
-            // $table->tinyInteger('available')->default(0);
-
-
             $table->text('tags')->nullable();
             $table->unsignedBigInteger('id_articulo')->nullable();
             $table->integer('unidades_oferta')->nullable();
@@ -43,7 +37,6 @@ return new class extends Migration
             $table->softDeletes();
             $table->timestamps();
             $table->foreign('product_id')->references('id')->on('products')->onDelete('cascade');
-            // $table->foreign('lang_id')->references('id')->on('langs')->onDelete('cascade');
             $table->unique(['reference', 'product_id'], 'product_reference_lang_unique');
         });
     }

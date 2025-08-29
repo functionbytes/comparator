@@ -26,7 +26,7 @@ class LangsTableSeeder extends Seeder
                 'iso_code'       => $lang['iso_code'],
                 'lenguage_code'  => $lang['lenguage_code'],
                 'locate'         => $lang['locate'],
-                'iva'      => $lang['iva'],
+                'iva'            => $lang['iva'],
                 'available'      => $lang['available'],
                 'created_at'     => now(),
                 'updated_at'     => now(),

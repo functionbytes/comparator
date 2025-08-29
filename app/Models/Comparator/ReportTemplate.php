@@ -14,7 +14,6 @@ class ReportTemplate extends Model
 
     protected $fillable = [
         'comparator_id',
-        'lang_id',
         'type_id',
         'title',
         'description',
